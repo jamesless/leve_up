@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/game_table.css">
+</head>
+<body>
+    <div class="game-table-container">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="room-info">
+                <span class="room-name">{{.game.Name}}</span>
+                <span class="room-id">ID: {{.game.ID}}</span>
+            </div>
+            <div class="game-info">
+                <span class="level-badge">{{.currentLevel}}级</span>
+                <span class="round-info">第1轮</span>
+            </div>
+            <button class="btn-leave" onclick="leaveGame()">离开房间</button>
+        </div>
+
+        <!-- Game Table -->
+        <div class="game-table">
+            <!-- Table Center - Played Cards -->
+            <div class="table-center">
+                <div class="played-cards-area" id="playedCards">
+                    <!-- Cards will be added here dynamically -->
+                    <p class="empty-hint">等待出牌...</p>
+                </div>
+                
+                <!-- Center Info -->
+                <div class="center-info">
+                    <div class="trick-info">
+                        <span class="trick-count">当前轮: 0/5</span>
+                        <span class="trick-winner">赢家: -</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Positions (5 players around the table) -->
+            <!-- Player 1 - Bottom (Current User) -->
+            <div class="player-position player-bottom" data-seat="1">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">我</span>
+                    <span class="player-level">2级</span>
+                </div>
+                <div class="player-cards" id="player1-cards">
+                    <!-- Hand cards will be added here -->
+                </div>
+            </div>
+
+            <!-- Player 2 - Left -->
+            <div class="player-position player-left" data-seat="2">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">玩家2</span>
+                    <span class="player-cards-count">30张</span>
+                </div>
+                <div class="player-hand-back">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 3 - Top Left -->
+            <div class="player-position player-top-left" data-seat="3">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">玩家3</span>
+                    <span class="player-cards-count">30张</span>
+                </div>
+                <div class="player-hand-side">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 4 - Top Right -->
+            <div class="player-position player-top-right" data-seat="4">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">玩家4</span>
+                    <span class="player-cards-count">30张</span>
+                </div>
+                <div class="player-hand-side">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 5 - Right -->
+            <div class="player-position player-right" data-seat="5">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">玩家5</span>
+                    <span class="player-cards-count">30张</span>
+                </div>
+                <div class="player-hand-back">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Current Player Indicator -->
+            <div class="current-player-indicator" id="currentPlayerIndicator">
+                <span class="player-arrow player-bottom">▲</span>
+            </div>
+
+            <!-- Friend Card Display -->
+            <div class="friend-card-display" id="friendCardDisplay">
+                <span class="friend-label">朋友牌:</span>
+                <div class="called-card">
+                    <span class="card-suit">♠</span>
+                    <span class="card-value">A</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- My Hand (Bottom Player) -->
+        <div class="my-hand-section">
+            <div class="hand-header">
+                <span class="hand-title">我的手牌</span>
+                <span class="sort-btn" onclick="sortHand()">整理</span>
+            </div>
+            <div class="my-cards" id="myCards">
+                <!-- Cards will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <button class="btn-action" id="playBtn" onclick="playSelectedCard()" disabled>出牌</button>
+            <button class="btn-action btn-pass" onclick="passRound()">不出</button>
+            <button class="btn-action btn-hint" onclick="showHint()">提示</button>
+        </div>
+    </div>
+
+    <!-- Card Selection Modal -->
+    <div id="cardModal" class="modal card-modal" style="display: none;">
+        <div class="modal-content card-modal-content">
+            <div class="modal-header">
+                <h2>选择要出的牌</h2>
+                <button class="modal-close" onclick="closeCardModal()">&times;</button>
+            </div>
+            <div class="modal-body card-selection-body">
+                <div id="cardOptions" class="card-options">
+                    <!-- Card options will be added here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const GAME_DATA = {{.gameJSON}};
+        const MY_HAND = {{.myHandJSON}};
+        let selectedCardIndex = -1;
+
+        // Initialize game
+        document.addEventListener('DOMContentLoaded', function() {
+            renderMyHand();
+            updatePlayerPositions();
+            highlightCurrentPlayer();
+        });
+
+        function renderMyHand() {
+            const container = document.getElementById('myCards');
+            container.innerHTML = MY_HAND.cards.map((card, index) => `
+                <div class="playing-card ${selectedCardIndex === index ? 'selected' : ''}" 
+                     data-index="${index}" 
+                     onclick="selectCard(${index})"
+                     style="animation-delay: ${index * 0.05}s">
+                    <div class="card-suit ${card.suit}">
+                        ${getSuitSymbol(card.suit)}
+                    </div>
+                    <div class="card-value">${card.value}</div>
+                    <div class="card-type ${card.type}">${card.type === 'joker' ? (card.value === 'big' ? '大' : '小') : ''}</div>
+                </div>
+            `).join('');
+        }
+
+        function getSuitSymbol(suit) {
+            const symbols = {
+                'spades': '♠',
+                'hearts': '♥',
+                'clubs': '♣',
+                'diamonds': '♦'
+            };
+            return symbols[suit] || suit;
+        }
+
+        function selectCard(index) {
+            selectedCardIndex = index;
+            document.querySelectorAll('.playing-card').forEach((card, i) => {
+                if (i === index) {
+                    card.classList.add('selected');
+                } else {
+                    card.classList.remove('selected');
+                }
+            });
+            document.getElementById('playBtn').disabled = false;
+        }
+
+        function playSelectedCard() {
+            if (selectedCardIndex < 0) return;
+            
+            // Call the play API
+            fetch(`/api/game/${GAME_DATA.id}/play`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: `cardIndex=${selectedCardIndex}`
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                }
+            });
+        }
+
+        function updatePlayerPositions() {
+            // Update player card counts
+            GAME_DATA.players.forEach(player => {
+                if (player.seat !== 1) { // Not current user
+                    const seat = document.querySelector(`[data-seat="${player.seat}"]`);
+                    if (seat) {
+                        seat.querySelector('.player-cards-count').textContent = `${player.cardCount}张`;
+                    }
+                }
+            });
+        }
+
+        function highlightCurrentPlayer() {
+            const currentPlayer = GAME_DATA.currentPlayer;
+            const indicator = document.getElementById('currentPlayerIndicator');
+            const positions = ['bottom', 'left', 'top-left', 'top-right', 'right'];
+            
+            indicator.className = 'current-player-indicator';
+            indicator.classList.add(`player-${positions[currentPlayer - 1]}`);
+        }
+
+        function sortHand() {
+            // Sort cards by suit and value
+            MY_HAND.cards.sort((a, b) => {
+                const suitOrder = {'spades': 0, 'hearts': 1, 'clubs': 2, 'diamonds': 3, 'joker': 4};
+                if (suitOrder[a.suit] !== suitOrder[b.suit]) {
+                    return suitOrder[a.suit] - suitOrder[b.suit];
+                }
+                const valueOrder = {'2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12};
+                return valueOrder[a.value] - valueOrder[b.value];
+            });
+            renderMyHand();
+        }
+
+        function closeCardModal() {
+            document.getElementById('cardModal').style.display = 'none';
+        }
+
+        function leaveGame() {
+            if (confirm('确定要离开游戏吗？')) {
+                window.location.href = '/game';
+            }
+        }
+
+        function passRound() {
+            // Implement pass logic
+            alert('跳过本轮');
+        }
+
+        function showHint() {
+            // Show hint for current hand
+            alert('提示功能开发中');
+        }
+    </script>
+</body>
+</html>

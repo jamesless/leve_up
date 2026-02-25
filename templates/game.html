@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🃏</span>
+                    <span class="logo-text">找朋友升级</span>
+                </div>
+                <nav class="nav">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/rules" class="nav-link">规则</a>
+                    <a href="/game" class="nav-link active">游戏大厅</a>
+                    <span class="nav-user" id="navUser">加载中...</span>
+                    <button class="btn btn-outline" onclick="logout()">退出</button>
+                </nav>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Game Lobby -->
+        <main class="game-lobby">
+            <div class="container">
+                <div class="lobby-header">
+                    <h1>游戏大厅</h1>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="createSinglePlayerGame()">🤖 单人模式</button>
+                        <button class="btn btn-primary" onclick="createGame()">创建房间</button>
+                    </div>
+                </div>
+
+                <div class="lobby-content">
+                    <!-- User Info -->
+                    <div class="user-panel">
+                        <div class="user-avatar">👤</div>
+                        <div class="user-info">
+                            <h3 id="username">加载中...</h3>
+                            <p>当前等级: <span id="userLevel" class="level-badge">-</span></p>
+                            <p>战绩: <span id="userStats">-</span></p>
+                        </div>
+                    </div>
+
+                    <!-- Game Rooms -->
+                    <div class="rooms-section">
+                        <h2>游戏房间</h2>
+                        <div id="roomsList" class="rooms-list">
+                            <div class="rooms-loading">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Game Room Modal -->
+        <div id="roomModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="roomTitle">游戏房间</h2>
+                    <button class="modal-close" onclick="closeRoomModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="roomPlayers" class="room-players">
+                        <!-- Players will be loaded here -->
+                    </div>
+                    <div class="room-actions">
+                        <button id="startGameBtn" class="btn btn-primary" onclick="startGame()" style="display: none;">开始游戏</button>
+                        <button class="btn btn-secondary" onclick="leaveRoom()">离开房间</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Room Modal -->
+        <div id="createModal" class="modal" style="display: none;">
+            <div class="modal-content modal-small">
+                <div class="modal-header">
+                    <h2>创建房间</h2>
+                    <button class="modal-close" onclick="closeCreateModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="createForm">
+                        <div class="form-group">
+                            <label for="roomName">房间名称</label>
+                            <input type="text" id="roomName" placeholder="我的房间" value="新房间">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block">创建</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/game.js"></script>
+</body>
+</html>

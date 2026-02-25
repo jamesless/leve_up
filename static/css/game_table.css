@@ -1,0 +1,693 @@
+/* 雀魂风格游戏桌样式 */
+
+/* Reset and Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Microsoft YaHei', 'SimHei', sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #cfd8dc;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+/* Game Table Container */
+.game-table-container {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Top Bar */
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+.room-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.room-name {
+    font-size: 18px;
+    font-weight: bold;
+    color: #FFD700;
+}
+
+.room-id {
+    font-size: 12px;
+    color: #888;
+}
+
+.game-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.level-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    color: white;
+}
+
+.round-info {
+    font-size: 12px;
+    color: #aaa;
+}
+
+.btn-leave {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-leave:hover {
+    background: rgba(255, 87, 34, 0.3);
+}
+
+/* Game Table - Main Area */
+.game-table {
+    flex: 1;
+    position: relative;
+    background: 
+        radial-gradient(ellipse at center, #2d5a3a 0%, #1e4a2e 70%, #0d1b1a 100%),
+        url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%232d5a3a" width="100" height="100"/><g opacity="0.1"><circle cx="25" cy="25" r="20" fill="%23344945"/><circle cx="75" cy="25" r="20" fill="%23344945"/><circle cx="25" cy="75" r="20" fill="%23344945"/><circle cx="75" cy="75" r="20" fill="%23344945"/></g></svg>');
+    background-size: cover;
+    margin: 20px;
+    border-radius: 20px;
+    box-shadow: 
+        0 10px 40px rgba(0, 0, 0, 0.5),
+        inset 0 0 100px rgba(0, 0, 0, 0.3);
+    border: 8px solid #8B4513;
+    position: relative;
+}
+
+/* Wood texture border */
+.game-table::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: 20px;
+    padding: 6px;
+    background: linear-gradient(45deg, #8B4513 0%, #D2691E 25%, #8B4513 50%, #A0522D 75%, #8B4513 100%);
+    background-size: 20px 20px;
+    z-index: -1;
+    opacity: 0.9;
+    box-shadow: 
+        0 15px 50px rgba(0, 0, 0, 0.5),
+        inset 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Table Center - Played Cards Area */
+.table-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60%;
+    height: 40%;
+}
+
+.played-cards-area {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    padding: 20px;
+}
+
+.empty-hint {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 14px;
+}
+
+.center-info {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+}
+
+.trick-info {
+    display: flex;
+    gap: 20px;
+    font-size: 14px;
+}
+
+.trick-count {
+    color: #FFD700;
+}
+
+.trick-winner {
+    color: #4CAF50;
+}
+
+/* Player Positions */
+.player-position {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Bottom Position (Current Player) */
+.player-bottom {
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* Left Position */
+.player-left {
+    left: -40px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* Top Left Position */
+.player-top-left {
+    top: -20px;
+    left: 15%;
+}
+
+/* Top Right Position */
+.player-top-right {
+    top: -20px;
+    right: 15%;
+}
+
+/* Right Position */
+.player-right {
+    right: -40px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* Player Info */
+.player-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin-bottom: 5px;
+}
+
+.player-avatar {
+    width: 50px;
+    height: 50px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.player-name {
+    font-size: 12px;
+    color: #fff;
+    margin-top: 2px;
+}
+
+.player-level {
+    font-size: 10px;
+    color: #FFD700;
+}
+
+.player-cards-count {
+    font-size: 11px;
+    color: #888;
+}
+
+/* Card Back (for other players) */
+.player-hand-back,
+.player-hand-side {
+    display: flex;
+    gap: 2px;
+    justify-content: center;
+}
+
+.card-back {
+    width: 25px;
+    height: 35px;
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    border: 2px solid #1a252f;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+/* Current Player Indicator */
+.current-player-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.player-arrow {
+    position: absolute;
+    font-size: 24px;
+    color: #4CAF50;
+    text-shadow: 0 0 10px rgba(76, 175, 80, 0.8);
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+.player-arrow.player-bottom {
+    bottom: 25%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.player-arrow.player-left {
+    left: 25%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.player-arrow.player-top-left {
+    top: 30%;
+    left: 25%;
+}
+
+.player-arrow.player-top-right {
+    top: 30%;
+    right: 25%;
+}
+
+.player-arrow.player-right {
+    right: 25%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* Friend Card Display */
+.friend-card-display {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
+.friend-label {
+    font-size: 12px;
+    color: #aaa;
+    margin-right: 10px;
+}
+
+.called-card {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+.card-suit {
+    font-size: 20px;
+}
+
+.card-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: #fff;
+}
+
+/* My Hand Section */
+.my-hand-section {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 15px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hand-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.hand-title {
+    font-size: 16px;
+    color: #FFD700;
+}
+
+.sort-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #aaa;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s;
+}
+
+.sort-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+/* My Cards Container */
+.my-cards {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 120px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+}
+
+/* Playing Card Styles */
+.playing-card {
+    width: 70px;
+    height: 100px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+}
+
+.playing-card:hover {
+    transform: translateY(-15px) rotateX(5deg);
+    z-index: 10;
+}
+
+.playing-card.selected {
+    transform: translateY(-25px) rotateX(10deg);
+    box-shadow: 0 15px 30px rgba(76, 175, 80, 0.6);
+}
+
+/* Card Front */
+.playing-card > div {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, #ffffff 0%, #f0f0f0 100%);
+    box-shadow: 
+        0 2px 4px rgba(0, 0, 0, 0.1),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: 1px solid #ddd;
+}
+
+/* Card Suit Colors */
+.card-suit.spades, .card-suit.spades {
+    color: #2c3e50;
+}
+
+.card-suit.hearts, .card-suit.hearts {
+    color: #e74c3c;
+}
+
+.card-suit.clubs, .card-suit.clubs {
+    color: #27ae60;
+}
+
+.card-suit.diamonds, .card-suit.diamonds {
+    color: #3498db;
+}
+
+.card-suit.joker {
+    color: #9b59b6;
+}
+
+/* Card Value */
+.card-value {
+    font-size: 24px;
+    font-weight: bold;
+    position: absolute;
+    top: 8px;
+}
+
+/* Card Type (Joker) */
+.card-type.joker {
+    position: absolute;
+    bottom: 5px;
+    font-size: 10px;
+    color: #666;
+}
+
+.card-type.big {
+    color: #e74c3c;
+}
+
+/* Card Animation */
+@keyframes dealCard {
+    from {
+        opacity: 0;
+        transform: translateY(-200px) rotateY(180deg);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) rotateY(0deg);
+    }
+}
+
+.playing-card {
+    animation: dealCard 0.5s ease-out backwards;
+}
+
+/* Action Buttons */
+.action-buttons {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 15px 20px;
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-action {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-action:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.btn-play {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+}
+
+.btn-pass {
+    background: linear-gradient(135deg, #9E9E9E 0%, #757575 100%);
+    color: white;
+}
+
+.btn-hint {
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+    color: white;
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+}
+
+.modal-content {
+    max-width: 500px;
+    margin: 100px auto;
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.card-modal-content {
+    max-width: 700px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: #FFD700;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #888;
+    cursor: pointer;
+}
+
+.modal-close:hover {
+    color: #fff;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.card-options {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .game-table {
+        margin: 10px;
+        border-radius: 10px;
+    }
+    
+    .player-position {
+        transform: scale(0.8);
+    }
+    
+    .player-bottom {
+        bottom: -10px;
+    }
+    
+    .player-left {
+        left: -20px;
+    }
+    
+    .player-right {
+        right: -20px;
+    }
+    
+    .playing-card {
+        width: 55px;
+        height: 80px;
+    }
+    
+    .player-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+}
+
+/* Animations */
+@keyframes cardGlow {
+    0%, 100% {
+        box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 20px rgba(76, 175, 80, 0.6);
+    }
+}
+
+.playing-card:hover {
+    animation: cardGlow 1.5s infinite;
+}
+
+/* Winner Animation */
+@keyframes winnerGlow {
+    0%, 100% {
+        box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+    }
+}
+
+.player-avatar.winner {
+    animation: winnerGlow 2s infinite;
+}
+
+/* Card Suit Styles */
+.playing-card[data-suit="hearts"] {
+    border-color: #e74c3c;
+}
+
+.playing-card[data-suit="hearts"] .card-suit {
+    color: #e74c3c;
+}
+
+.playing-card[data-suit="diamonds"] {
+    border-color: #3498db;
+}
+
+.playing-card[data-suit="diamonds"] .card-suit {
+    color: #3498db;
+}
+
+.playing-card[data-suit="spades"] {
+    border-color: #2c3e50;
+}
+
+.playing-card[data-suit="spades"] .card-suit {
+    color: #2c3e50;
+}
+
+.playing-card[data-suit="clubs"] {
+    border-color: #27ae60;
+}
+
+.playing-card[data-suit="clubs"] .card-suit {
+    color: #27ae60;
+}

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🃏</span>
+                    <span class="logo-text">找朋友升级</span>
+                </div>
+                <nav class="nav">
+                    <a href="/" class="nav-link">首页</a>
+                    <a href="/rules" class="nav-link active">规则</a>
+                    {{if .loggedIn}}
+                        <a href="/game" class="nav-link">游戏大厅</a>
+                        <span class="nav-user">{{.user.Username}} ({{.user.Level}}级)</span>
+                        <button class="btn btn-outline" onclick="logout()">退出</button>
+                    {{else}}
+                        <a href="/login" class="btn btn-outline">登录</a>
+                        <a href="/register" class="btn btn-primary">注册</a>
+                    {{end}}
+                </nav>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Rules Content -->
+        <main class="rules-page">
+            <div class="container">
+                <div class="rules-header">
+                    <h1>5人三副牌找朋友升级</h1>
+                    <p class="rules-subtitle">完整游戏规则（正式版）</p>
+                    <div class="rules-summary">
+                        <span class="summary-badge">5人</span>
+                        <span class="summary-badge">3副牌</span>
+                        <span class="summary-badge">60分一级</span>
+                        <span class="summary-badge">底牌7张</span>
+                        <span class="summary-badge">反主最多3张</span>
+                    </div>
+                </div>
+
+                <!-- Rule Sections -->
+                <div class="rules-content">
+                    <section class="rule-section">
+                        <h2>一、基础信息</h2>
+                        <div class="rule-grid">
+                            <div class="rule-item">
+                                <span class="rule-label">玩家人数</span>
+                                <span class="rule-value">5人</span>
+                            </div>
+                            <div class="rule-item">
+                                <span class="rule-label">牌具</span>
+                                <span class="rule-value">三副扑克牌（共162张）</span>
+                            </div>
+                            <div class="rule-item">
+                                <span class="rule-label">分牌</span>
+                                <span class="rule-value">5=5分，10=10分，K=10分</span>
+                            </div>
+                            <div class="rule-item">
+                                <span class="rule-label">总分</span>
+                                <span class="rule-value">三副牌共300分</span>
+                            </div>
+                            <div class="rule-item">
+                                <span class="rule-label">开局打</span>
+                                <span class="rule-value">2</span>
+                            </div>
+                            <div class="rule-item">
+                                <span class="rule-label">升级方式</span>
+                                <span class="rule-value">每人单独升级，从2打到A，先打完获胜</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>二、发牌规则</h2>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                <strong>每人发牌：</strong>31张
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>底牌数量：</strong>7张
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>发牌顺序：</strong>顺时针发牌，全部发完后留7张作为底牌
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>三、抢庄、亮主、反主规则</h2>
+                        <h3>抢庄</h3>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                <strong>首局：</strong>谁先亮出单张级牌（如单张2），谁当庄家
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>后续：</strong>上局庄家方赢则庄家连庄；抓分方赢则轮流下家坐庄
+                            </div>
+                        </div>
+
+                        <h3>亮主</h3>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                亮出单张级牌即可定该花色为主
+                            </div>
+                        </div>
+
+                        <h3>反主（三副牌专用，最多反到3张）</h3>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                <strong>反主强度从小到大：</strong>
+                                <ul>
+                                    <li>单张级牌</li>
+                                    <li>一对级牌</li>
+                                    <li>三张级牌（封顶，不能再反）</li>
+                                </ul>
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>王反主规则：</strong>
+                                <ul>
+                                    <li>一对王 → 可反一对级牌</li>
+                                    <li>三张王 → 可反三张级牌（封顶）</li>
+                                </ul>
+                            </div>
+                            <div class="rule-list-item">
+                                最终反主结果决定主花色
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>四、庄家流程</h2>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                <strong>拿底牌：</strong>庄家收取7张底牌，看牌后替换7张牌扣回底牌。扣底不能故意全扣分（按常规约定）
+                            </div>
+                            <div class="rule-list-item highlight">
+                                <strong>找朋友（核心）：</strong>庄家叫一张指定牌（花色+点数，例如：红桃A）。游戏中第一个打出这张牌的玩家，自动成为庄家的秘密盟友。庄家与盟友为一方，其余3人为抓分方（2打3）。若庄家叫的牌在自己手里或扣在底牌，则无人应叫，庄家1打4
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>定主：</strong>按亮主/反主结果确定主花色
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>五、出牌规则</h2>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                <strong>出牌顺序：</strong>顺时针
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>必须跟同花色：</strong>
+                                <ul>
+                                    <li>首家出单张，必须跟单张同花色</li>
+                                    <li>首家出对子，必须跟对子同花色</li>
+                                    <li>首家出三张，必须跟三张同花色</li>
+                                    <li>无同花色时，可垫其他副牌，或用主牌毙牌</li>
+                                </ul>
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>允许牌型：</strong>单张、对子、三张、拖拉机（连对、连三张）、甩牌
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>甩牌规则：</strong>必须保证同花色组合最大，否则按最小单张算
+                            </div>
+                            <div class="rule-list-item">
+                                每轮牌最大者赢取本轮所有分，并领出下一轮
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>六、抠底与底牌分计算</h2>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                底牌分在最后一圈被"抠底"时计入抓分方总分
+                            </div>
+                            <div class="rule-list-item">
+                                <strong>抠底倍数：</strong>
+                                <ul>
+                                    <li>单张抠底：×2</li>
+                                    <li>对子抠底：×4</li>
+                                    <li>三张抠底：×8</li>
+                                    <li>拖拉机抠底：按对应牌型翻倍</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>七、胜负与升级规则（60分一级，300分制）</h2>
+
+                        <h3>1. 正常局：庄家找到盟友（2打3）</h3>
+                        <table class="rules-table">
+                            <thead>
+                                <tr>
+                                    <th>抓分</th>
+                                    <th>结果</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>0分（大光）</td><td>庄家方连升3级</td></tr>
+                                <tr><td>1–59分（小光）</td><td>庄家方连升2级</td></tr>
+                                <tr><td>60–119分</td><td>庄家方升1级</td></tr>
+                                <tr><td>120–179分</td><td>抓分方上台，每人升1级</td></tr>
+                                <tr><td>180–239分</td><td>抓分方上台，每人升2级</td></tr>
+                                <tr><td>240–299分</td><td>抓分方上台，每人升3级</td></tr>
+                                <tr><td>300分（满光）</td><td>抓分方上台，每人升4级</td></tr>
+                            </tbody>
+                        </table>
+
+                        <h3>2. 独打局：庄家1打4</h3>
+                        <table class="rules-table">
+                            <thead>
+                                <tr>
+                                    <th>抓分</th>
+                                    <th>结果</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>0–59分</td><td>庄家独赢，升4级</td></tr>
+                                <tr><td>60–119分</td><td>庄家升2级</td></tr>
+                                <tr><td>120–179分</td><td>抓分方上台，每人升1级</td></tr>
+                                <tr><td>≥180分</td><td>抓分方上台，每人升2级</td></tr>
+                            </tbody>
+                        </table>
+                    </section>
+
+                    <section class="rule-section">
+                        <h2>八、胜负判定</h2>
+                        <div class="rule-list">
+                            <div class="rule-list-item">
+                                所有人单独记级
+                            </div>
+                            <div class="rule-list-item">
+                                先从2→3→…→A打完并赢下该局的玩家，为最终赢家
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <div class="rules-actions">
+                    {{if .loggedIn}}
+                        <a href="/game" class="btn btn-primary btn-large">进入游戏</a>
+                    {{else}}
+                        <a href="/register" class="btn btn-primary btn-large">注册开始游戏</a>
+                    {{end}}
+                    <a href="/" class="btn btn-secondary btn-large">返回首页</a>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="container">
+                <p>&copy; 2024 找朋友升级 - 经典扑克游戏</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

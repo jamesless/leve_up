@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/game_table.css">
+    <style>
+        /* Additional styles for single player game */
+        .playing-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .playing-card:hover {
+            transform: translateY(-20px) rotateX(5deg);
+            z-index: 100;
+        }
+
+        .playing-card.selected {
+            transform: translateY(-30px) rotateX(10deg);
+            box-shadow: 0 20px 40px rgba(76, 175, 80, 0.8);
+        }
+
+        .playing-card.selected .card-suit {
+            color: #4CAF50;
+        }
+
+        /* Can't play indicator */
+        .playing-card.cant-play {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .playing-card.cant-play:hover {
+            transform: none;
+        }
+
+        /* Trick cards display */
+        .trick-card {
+            position: absolute;
+            font-size: 24px;
+            font-weight: bold;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            animation: playCard 0.3s ease-out;
+        }
+
+        .trick-card.seat-1 { bottom: 30%; left: 50%; transform: translateX(-50%); }
+        .trick-card.seat-2 { left: 25%; top: 50%; transform: translateY(-50%); }
+        .trick-card.seat-3 { top: 25%; left: 50%; transform: translateX(-50%); }
+        .trick-card.seat-4 { top: 25%; right: 25%; }
+        .trick-card.seat-5 { right: 20%; top: 50%; transform: translateY(-50%); }
+
+        @keyframes playCard {
+            from {
+                opacity: 0;
+                transform: scale(0.5);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .trick-card.red { color: #e74c3c; }
+        .trick-card.black { color: #2c3e50; }
+
+        /* Status message */
+        .game-status {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 18px;
+            z-index: 50;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Action buttons update */
+        .action-buttons {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-action {
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-play {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-play:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        /* Card hint */
+        .card-hint {
+            position: fixed;
+            bottom: 200px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 193, 7, 0.95);
+            color: #333;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 200;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 20px);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-table-container">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="room-info">
+                <span class="room-name">{{.game.Name}}</span>
+                <span class="room-id">单人模式</span>
+            </div>
+            <div class="game-info">
+                <span class="level-badge">{{.currentLevel}}级</span>
+                <span class="round-info" id="roundInfo">第1轮</span>
+            </div>
+            <button class="btn-leave" onclick="leaveGame()">返回大厅</button>
+        </div>
+
+        <!-- Game Table -->
+        <div class="game-table" id="gameTable">
+            <!-- Table Center - Played Cards -->
+            <div class="table-center">
+                <div class="played-cards-area" id="playedCards">
+                    <p class="empty-hint" id="emptyHint">等待出牌...</p>
+                </div>
+
+                <!-- Center Info -->
+                <div class="center-info">
+                    <div class="trick-info">
+                        <span class="trick-count" id="trickCount">当前轮: 0/5</span>
+                        <span class="trick-winner" id="trickWinner">当前: <span id="currentPlayerName">-</span></span>
+                    </div>
+                </div>
+
+                <!-- Friend Card Display -->
+                <div class="friend-card-display" id="friendCardDisplay" style="display: none;">
+                    <span class="friend-label">朋友牌:</span>
+                    <div class="called-card">
+                        <span class="card-suit" id="calledSuit">♠</span>
+                        <span class="card-value" id="calledValue">A</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Positions (5 players around the table) -->
+            <!-- Player 1 - Bottom (Current User) -->
+            <div class="player-position player-bottom" data-seat="1">
+                <div class="player-info">
+                    <div class="player-avatar">👤</div>
+                    <span class="player-name">我</span>
+                    <span class="player-level">2级</span>
+                    <span id="myFriendBadge" class="friend-badge" style="display: none; background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px;">朋友</span>
+                </div>
+            </div>
+
+            <!-- Player 2 - Left -->
+            <div class="player-position player-left" data-seat="2">
+                <div class="player-info">
+                    <div class="player-avatar">🤖</div>
+                    <span class="player-name">AI-2</span>
+                    <span class="player-cards-count" id="seat2-count">30张</span>
+                    <span id="seat2-friend" class="friend-badge" style="display: none; background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px;">朋友</span>
+                </div>
+                <div class="player-hand-back">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 3 - Top Left -->
+            <div class="player-position player-top-left" data-seat="3">
+                <div class="player-info">
+                    <div class="player-avatar">🤖</div>
+                    <span class="player-name">AI-3</span>
+                    <span class="player-cards-count" id="seat3-count">30张</span>
+                    <span id="seat3-friend" class="friend-badge" style="display: none; background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px;">朋友</span>
+                </div>
+                <div class="player-hand-side">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 4 - Top Right -->
+            <div class="player-position player-top-right" data-seat="4">
+                <div class="player-info">
+                    <div class="player-avatar">🤖</div>
+                    <span class="player-name">AI-4</span>
+                    <span class="player-cards-count" id="seat4-count">30张</span>
+                    <span id="seat4-friend" class="friend-badge" style="display: none; background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px;">朋友</span>
+                </div>
+                <div class="player-hand-side">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Player 5 - Right -->
+            <div class="player-position player-right" data-seat="5">
+                <div class="player-info">
+                    <div class="player-avatar">🤖</div>
+                    <span class="player-name">AI-5</span>
+                    <span class="player-cards-count" id="seat5-count">30张</span>
+                    <span id="seat5-friend" class="friend-badge" style="display: none; background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px;">朋友</span>
+                </div>
+                <div class="player-hand-back">
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                    <div class="card-back"></div>
+                </div>
+            </div>
+
+            <!-- Current Player Indicator -->
+            <div class="current-player-indicator" id="currentPlayerIndicator">
+                <span class="player-arrow player-bottom">▲</span>
+            </div>
+        </div>
+
+        <!-- My Hand (Bottom Player) -->
+        <div class="my-hand-section">
+            <div class="hand-header">
+                <span class="hand-title">我的手牌 (<span id="myCardCount">0</span>张)</span>
+                <span class="sort-btn" onclick="sortHand()">📋 整理手牌</span>
+            </div>
+            <div class="my-cards" id="myCards">
+                <!-- Cards will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <button class="btn-action btn-play" id="playBtn" onclick="playSelectedCard()" disabled>出牌</button>
+            <button class="btn-action btn-pass" id="passBtn" onclick="showHint()" style="background: rgba(255,255,255,0.1); color: white;">💡 提示</button>
+        </div>
+    </div>
+
+    <script>
+        const GAME_ID = "{{.gameID}}";
+        const GAME_DATA_RAW = {{.gameJSON}};
+        const MY_HAND_RAW = {{.myHandJSON}};
+        let GAME_DATA = GAME_DATA_RAW || null;
+        let MY_HAND = MY_HAND_RAW || null;
+        let selectedCardIndex = -1;
+        let isProcessing = false;
+
+        // Card symbols
+        const suitSymbols = {
+            'spades': '♠',
+            'hearts': '♥',
+            'clubs': '♣',
+            'diamonds': '♦',
+            'joker': '🃏'
+        };
+
+        const suitColors = {
+            'spades': 'black',
+            'hearts': 'red',
+            'clubs': 'black',
+            'diamonds': 'red',
+            'joker': 'gold'
+        };
+
+        // Initialize game
+        document.addEventListener('DOMContentLoaded', function() {
+            // If no data from server, load from API
+            if (!GAME_DATA || !MY_HAND) {
+                loadGameDataFromAPI();
+            } else {
+                renderGame();
+            }
+        });
+
+        async function loadGameDataFromAPI() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                showStatus('请先登录');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/game/${GAME_ID}/table`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    GAME_DATA = result;
+                    if (result.myHand) {
+                        MY_HAND = result.myHand;
+                    }
+                    renderGame();
+                } else {
+                    showStatus('加载游戏失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Failed to load game:', e);
+                showStatus('网络错误');
+            }
+        }
+
+        function renderGame() {
+            renderMyHand();
+            updateDisplay();
+            highlightCurrentPlayer();
+        }
+
+        function getSuitSymbol(suit) {
+            return suitSymbols[suit] || suit;
+        }
+
+        function getSuitColor(suit) {
+            return suitColors[suit] || 'black';
+        }
+
+        function renderMyHand() {
+            const container = document.getElementById('myCards');
+            container.innerHTML = '';
+            document.getElementById('myCardCount').textContent = MY_HAND.cards.length;
+
+            // Sort cards by suit and value
+            const sortedCards = [...MY_HAND.cards].sort((a, b) => {
+                const suitOrder = {'spades': 0, 'hearts': 1, 'clubs': 2, 'diamonds': 3, 'joker': 4};
+                if (suitOrder[a.suit] !== suitOrder[b.suit]) {
+                    return suitOrder[a.suit] - suitOrder[b.suit];
+                }
+                const valueOrder = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14, 'small': 1, 'big': 15};
+                return valueOrder[a.value] - valueOrder[b.value];
+            });
+
+            sortedCards.forEach((card, idx) => {
+                const originalIndex = MY_HAND.cards.indexOf(card);
+                const cardEl = document.createElement('div');
+                cardEl.className = 'playing-card';
+                cardEl.dataset.index = originalIndex;
+                cardEl.onclick = () => selectCard(originalIndex);
+
+                const color = getSuitColor(card.suit);
+                const symbol = getSuitSymbol(card.suit);
+
+                cardEl.innerHTML = `
+                    <div class="card-suit ${card.suit}" style="color: ${color}">${symbol}</div>
+                    <div class="card-value" style="color: ${color}">${card.value}</div>
+                    ${card.type === 'joker' ? `<div class="card-type joker">${card.value === 'big' ? '大' : '小'}王</div>` : ''}
+                `;
+
+                if (selectedCardIndex === originalIndex) {
+                    cardEl.classList.add('selected');
+                }
+
+                container.appendChild(cardEl);
+            });
+        }
+
+        function selectCard(index) {
+            if (GAME_DATA.currentPlayer !== 1) {
+                showStatus('不是你的回合！', 1500);
+                return;
+            }
+
+            selectedCardIndex = index;
+            document.querySelectorAll('.playing-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            const selected = document.querySelector(`[data-index="${index}"]`);
+            if (selected) {
+                selected.classList.add('selected');
+            }
+            document.getElementById('playBtn').disabled = false;
+        }
+
+        async function playSelectedCard() {
+            if (selectedCardIndex < 0 || isProcessing) return;
+
+            isProcessing = true;
+            document.getElementById('playBtn').disabled = true;
+
+            const token = localStorage.getItem('token');
+            try {
+                const response = await fetch(`/api/game/${GAME_DATA.id}/play`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: `cardIndex=${selectedCardIndex}`
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    selectedCardIndex = -1;
+                    await refreshGameState();
+
+                    // If trick complete, show winner
+                    if (result.result && result.result.trickComplete) {
+                        showStatus(`本轮结束！玩家 ${result.result.trickWinner} 获胜`, 2000);
+                    }
+
+                    // AI turns
+                    await playAITurns();
+                } else {
+                    showStatus(result.error || '出牌失败', 2000);
+                }
+            } catch (e) {
+                showStatus('网络错误', 1500);
+            }
+
+            isProcessing = false;
+        }
+
+        async function playAITurns() {
+            const token = localStorage.getItem('token');
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            while (GAME_DATA.currentPlayer !== 1 && attempts < maxAttempts && GAME_DATA.status === 'playing') {
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 800));
+
+                try {
+                    await fetch(`/api/game/${GAME_DATA.id}/ai-play`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    await refreshGameState();
+                } catch (e) {
+                    break;
+                }
+            }
+
+            if (GAME_DATA.currentPlayer === 1) {
+                showStatus('轮到你出牌了！', 1500);
+            }
+        }
+
+        async function refreshGameState() {
+            const token = localStorage.getItem('token');
+            try {
+                const response = await fetch(`/api/game/${GAME_DATA.id}/table`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    Object.assign(GAME_DATA, result);
+                    if (result.myHand) {
+                        MY_HAND.cards = result.myHand.cards;
+                    }
+                    renderMyHand();
+                    updateDisplay();
+                    highlightCurrentPlayer();
+                }
+            } catch (e) {
+                console.error('Failed to refresh game state', e);
+            }
+        }
+
+        function updateDisplay() {
+            // Update current player name
+            const playerNames = ['', '我', 'AI-2', 'AI-3', 'AI-4', 'AI-5'];
+            document.getElementById('currentPlayerName').textContent = playerNames[GAME_DATA.currentPlayer] || '-';
+
+            // Update AI card counts
+            for (let i = 2; i <= 5; i++) {
+                const countEl = document.getElementById(`seat${i}-count`);
+                const player = GAME_DATA.players.find(p => p.seat === i);
+                if (countEl && player) {
+                    countEl.textContent = `${player.cardCount || 0}张`;
+                }
+            }
+
+            // Update friend badges
+            for (let i = 1; i <= 5; i++) {
+                const badge = document.getElementById(i === 1 ? 'myFriendBadge' : `seat${i}-friend`);
+                if (badge) {
+                    const isFriend = GAME_DATA.friendRevealed && GAME_DATA.friendSeat === i;
+                    badge.style.display = isFriend ? 'inline' : 'none';
+                }
+            }
+
+            // Update called card
+            if (GAME_DATA.hostCalledCard) {
+                document.getElementById('friendCardDisplay').style.display = 'block';
+                document.getElementById('calledSuit').textContent = getSuitSymbol(GAME_DATA.hostCalledCard.suit);
+                document.getElementById('calledValue').textContent = GAME_DATA.hostCalledCard.value;
+            }
+
+            // Update trick cards
+            updateTrickCards();
+        }
+
+        function updateTrickCards() {
+            const trickArea = document.getElementById('playedCards');
+            trickArea.innerHTML = '';
+
+            if (!GAME_DATA.currentTrick || GAME_DATA.currentTrick.length === 0) {
+                trickArea.innerHTML = '<p class="empty-hint">等待出牌...</p>';
+                return;
+            }
+
+            GAME_DATA.currentTrick.forEach(play => {
+                const cardDiv = document.createElement('div');
+                cardDiv.className = `trick-card seat-${play.seat} ${getSuitColor(play.card.suit)}`;
+                cardDiv.textContent = `${getSuitSymbol(play.card.suit)}${play.card.value}`;
+                trickArea.appendChild(cardDiv);
+            });
+        }
+
+        function highlightCurrentPlayer() {
+            const indicator = document.getElementById('currentPlayerIndicator');
+            const positions = ['bottom', 'left', 'top-left', 'top-right', 'right'];
+
+            indicator.className = 'current-player-indicator';
+            indicator.innerHTML = `<span class="player-arrow player-${positions[GAME_DATA.currentPlayer - 1]}">▲</span>`;
+
+            // Highlight player area
+            document.querySelectorAll('.player-position').forEach(el => {
+                el.style.opacity = '0.6';
+            });
+            const currentPlayerEl = document.querySelector(`[data-seat="${GAME_DATA.currentPlayer}"]`);
+            if (currentPlayerEl) {
+                currentPlayerEl.style.opacity = '1';
+            }
+        }
+
+        function sortHand() {
+            renderMyHand();
+            showStatus('手牌已整理', 1000);
+        }
+
+        function showHint() {
+            showStatus('点击选择一张牌，然后点击出牌', 2000);
+        }
+
+        function showStatus(message, duration = 2000) {
+            const existing = document.querySelector('.game-status');
+            if (existing) existing.remove();
+
+            const statusEl = document.createElement('div');
+            statusEl.className = 'game-status';
+            statusEl.textContent = message;
+            document.getElementById('gameTable').appendChild(statusEl);
+
+            setTimeout(() => statusEl.remove(), duration);
+        }
+
+        function leaveGame() {
+            if (confirm('确定要离开游戏吗？')) {
+                window.location.href = '/game';
+            }
+        }
+    </script>
+</body>
+</html>
