@@ -23,17 +23,17 @@ type GameLogger struct {
 }
 
 type GameEvent struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	GameID      string                 `json:"gameId"`
-	EventType   string                 `json:"eventType"` // deal, play, trick_end, game_end
-	PlayerID    string                 `json:"playerId"`
-	PlayerSeat  int                    `json:"playerSeat"`
-	Card        Card                   `json:"card,omitempty"`
-	Cards       []Card                 `json:"cards,omitempty"`
-	Trick       []PlayedCard           `json:"trick,omitempty"`
-	Scores      map[string]int         `json:"scores,omitempty"`
-	Winner      int                    `json:"winner,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Timestamp  time.Time              `json:"timestamp"`
+	GameID     string                 `json:"gameId"`
+	EventType  string                 `json:"eventType"` // deal, play, trick_end, game_end
+	PlayerID   string                 `json:"playerId"`
+	PlayerSeat int                    `json:"playerSeat"`
+	Card       Card                   `json:"card,omitempty"`
+	Cards      []Card                 `json:"cards,omitempty"`
+	Trick      []PlayedCard           `json:"trick,omitempty"`
+	Scores     map[string]int         `json:"scores,omitempty"`
+	Winner     int                    `json:"winner,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // RuleValidator validates game logs against rules
@@ -52,14 +52,14 @@ type RuleViolation struct {
 
 // AutomatedTester manages the automated testing cycle
 type AutomatedTester struct {
-	BaseURL    string
-	Client     *http.Client
-	Token      string
-	LogDir     string
-	Version    string
-	GameCount  int
-	Logger     *GameLogger
-	Validator  *RuleValidator
+	BaseURL   string
+	Client    *http.Client
+	Token     string
+	LogDir    string
+	Version   string
+	GameCount int
+	Logger    *GameLogger
+	Validator *RuleValidator
 }
 
 func NewAutomatedTester(baseURL, logDir string) *AutomatedTester {
@@ -175,11 +175,11 @@ func (at *AutomatedTester) runSingleGame(gameNum int) error {
 
 	// Log deal event
 	at.logEvent(GameEvent{
-		Timestamp:   time.Now(),
-		GameID:      gameID,
-		EventType:   "deal",
-		Trick:       table.CurrentTrick,
-		Metadata:    map[string]interface{}{"trumpSuit": table.TrumpSuit},
+		Timestamp: time.Now(),
+		GameID:    gameID,
+		EventType: "deal",
+		Trick:     table.CurrentTrick,
+		Metadata:  map[string]interface{}{"trumpSuit": table.TrumpSuit},
 	})
 
 	// Play game until finished

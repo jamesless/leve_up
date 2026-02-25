@@ -10,8 +10,8 @@ import (
 
 // RuleValidator performs detailed rule validation
 type RuleValidator struct {
-	Rules       []GameRule
-	Violations  []RuleViolation
+	Rules        []GameRule
+	Violations   []RuleViolation
 	ScoringRules *ScoringRules
 }
 
@@ -35,8 +35,8 @@ type Card struct {
 
 // PlayedCard represents a card played in a trick
 type PlayedCard struct {
-	Seat int   `json:"seat"`
-	Card Card  `json:"card"`
+	Seat int  `json:"seat"`
+	Card Card `json:"card"`
 }
 
 // NewRuleValidator creates a new rule validator
@@ -46,9 +46,9 @@ func NewRuleValidator() *RuleValidator {
 		Violations: make([]RuleViolation, 0),
 		ScoringRules: &ScoringRules{
 			ScoringCards: map[string]int{
-				"5": 5,
+				"5":  5,
 				"10": 10,
-				"K": 10,
+				"K":  10,
 			},
 			Levels: []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"},
 		},
@@ -153,17 +153,17 @@ func (rv *RuleValidator) ValidateGameLogs(events []GameEvent) []RuleViolation {
 
 // GameEvent represents a logged game event
 type GameEvent struct {
-	Timestamp   string                 `json:"timestamp"`
-	GameID      string                 `json:"gameId"`
-	EventType   string                 `json:"eventType"`
-	PlayerID    string                 `json:"playerId"`
-	PlayerSeat  int                    `json:"playerSeat"`
-	Card        Card                   `json:"card,omitempty"`
-	Cards       []Card                 `json:"cards,omitempty"`
-	Trick       []PlayedCard           `json:"trick,omitempty"`
-	Scores      map[string]int         `json:"scores,omitempty"`
-	Winner      int                    `json:"winner,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Timestamp  string                 `json:"timestamp"`
+	GameID     string                 `json:"gameId"`
+	EventType  string                 `json:"eventType"`
+	PlayerID   string                 `json:"playerId"`
+	PlayerSeat int                    `json:"playerSeat"`
+	Card       Card                   `json:"card,omitempty"`
+	Cards      []Card                 `json:"cards,omitempty"`
+	Trick      []PlayedCard           `json:"trick,omitempty"`
+	Scores     map[string]int         `json:"scores,omitempty"`
+	Winner     int                    `json:"winner,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // groupEventsByGame groups events by game ID
@@ -245,7 +245,7 @@ func (rv *RuleValidator) validateTurnOrder(gameID string, events []GameEvent) {
 		currSeat := playEvents[i].PlayerSeat
 
 		// Calculate expected next seat
-		expectedSeat := prevSeat % 5 + 1
+		expectedSeat := prevSeat%5 + 1
 
 		if currSeat != expectedSeat {
 			// This might be a new trick, so check if there's a trick_end event
