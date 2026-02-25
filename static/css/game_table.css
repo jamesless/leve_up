@@ -23,6 +23,89 @@ body {
     flex-direction: column;
 }
 
+/* Bottom-right player info panel - simplified */
+.player-info-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(10px);
+    border-radius: 10px;
+    padding: 10px 15px;
+    z-index: 99;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 150px;
+}
+
+.player-info-panel .player-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.player-info-panel .player-name {
+    font-size: 15px;
+    font-weight: bold;
+    color: #fff;
+}
+
+.player-info-panel .player-level {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: bold;
+    display: inline-block;
+}
+
+.player-info-panel .player-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.player-info-panel .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    align-items: center;
+}
+
+.player-info-panel .stat-label {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+
+.player-info-panel .stat-value {
+    font-weight: bold;
+    color: #4CAF50;
+}
+
+.player-info-panel .stat-value.highlight {
+    color: #FFD700;
+}
+
+.player-info-panel .friend-indicator {
+    display: none;
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-top: 5px;
+    text-align: center;
+}
+
+.player-info-panel .friend-indicator.show {
+    display: block;
+}
+
 /* Top Bar */
 .top-bar {
     display: flex;

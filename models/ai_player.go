@@ -73,8 +73,13 @@ func (ai *AIPlayer) decideLeadCard(table *GameTable) int {
 		return ai.findLowestCard()
 	}
 
+	// Sort candidates by card value (ascending for lowest first)
+	sort.Slice(candidates, func(i, j int) bool {
+		return getCardBaseValue(ai.Hand[candidates[i]]) < getCardBaseValue(ai.Hand[candidates[j]])
+	})
+
 	// Play lowest card from the longest suit (conservative strategy)
-	return candidates[len(candidates)-1]
+	return candidates[0]
 }
 
 // decideFollowCard chooses a card when following a lead

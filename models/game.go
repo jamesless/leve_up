@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -42,7 +43,7 @@ type PlayerHand struct {
 type GameTable struct {
 	GameID         string              `json:"gameId"`
 	HostID         string              `json:"hostId"`
-	Status         string              `json:"status"`         // waiting, playing, finished
+	Status         string              `json:"status"`         // waiting, calling, playing, finished
 	CurrentLevel   string              `json:"currentLevel"`   // Current level being played
 	TrumpSuit      string              `json:"trumpSuit"`      // Current trump suit
 	HostCalledCard *CalledCard         `json:"hostCalledCard"` // Card host called for friend
@@ -57,6 +58,25 @@ type GameTable struct {
 	LastPlay       *PlayResult         `json:"lastPlay"`       // Last play result
 	CreatedAt      time.Time           `json:"createdAt"`
 	UpdatedAt      time.Time           `json:"updatedAt"`
+
+	// 抢庄相关字段
+	DealerSeat         int          `json:"dealerSeat"`         // 庄家座位号
+	StartingDealerSeat int          `json:"startingDealerSeat"` // 起始发牌人座位号
+	CallPhase          string       `json:"callPhase"`          // 抢庄阶段: counting, flipping, finished
+	CallCountdown      int          `json:"callCountdown"`      // 抢庄倒计时（秒）
+	CurrentCaller      int          `json:"currentCaller"`      // 当前叫庄者座位号
+	TrumpRank          string       `json:"trumpRank"`          // 级牌点数（如"2"表示打2级）
+	FlippedBottomCards []Card       `json:"flippedBottomCards"` // 已翻开的底牌
+	CallRecords        []CallRecord `json:"callRecords"`        // 抢庄记录
+}
+
+// CallRecord represents a bid for dealer
+type CallRecord struct {
+	Seat      int    `json:"seat"`      // 叫庄者座位号
+	Suit      string `json:"suit"`      // 叫庄花色
+	Rank      string `json:"rank"`      // 叫庄级牌点数
+	Count     int    `json:"count"`     // 叫庄张数（1=单张，2=对子，3=三张）
+	Timestamp int64  `json:"timestamp"` // 叫庄时间戳
 }
 
 // CalledCard represents the card the host calls to find a friend
@@ -107,23 +127,33 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 	// Deal cards
 	hands, bottomCards := DealCards(5)
 
+	// Determine starting dealer (random for first game)
+	startingDealer := rand.Intn(5) + 1 // Random seat 1-5
+
 	// Initialize game table
 	table := &GameTable{
-		GameID:         gameID,
-		HostID:         hostID,
-		Status:         "playing",
-		CurrentLevel:   game.CurrentLevel,
-		TrumpSuit:      "",
-		HostCalledCard: nil,
-		FriendRevealed: false,
-		BottomCards:    bottomCards,
-		CurrentPlayer:  1, // First player leads
-		TrickLeader:    1,
-		CurrentTrick:   make([]PlayedCard, 0),
-		TricksWon:      make([][]Card, 0),
-		PlayerHands:    make(map[int]*PlayerHand),
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		GameID:             gameID,
+		HostID:             hostID,
+		Status:             "calling", // 进入抢庄阶段
+		CurrentLevel:       game.CurrentLevel,
+		TrumpSuit:          "",
+		HostCalledCard:     nil,
+		FriendRevealed:     false,
+		BottomCards:        bottomCards,
+		CurrentPlayer:      startingDealer, // 起始发牌人先叫庄
+		TrickLeader:        startingDealer,
+		CurrentTrick:       make([]PlayedCard, 0),
+		TricksWon:          make([][]Card, 0),
+		PlayerHands:        make(map[int]*PlayerHand),
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		StartingDealerSeat: startingDealer, // 起始发牌人
+		CurrentCaller:      startingDealer,
+		CallPhase:          "counting", // 倒计时抢庄阶段
+		CallCountdown:      10,         // 10秒倒计时
+		TrumpRank:          game.CurrentLevel,
+		FlippedBottomCards: make([]Card, 0),
+		CallRecords:        make([]CallRecord, 0),
 	}
 
 	// Assign cards to players
@@ -349,17 +379,42 @@ func getCardValue(card Card, leadSuit, trumpSuit string) int {
 }
 
 // isScoringCard checks if a card is worth points
+// 规则：只有♠5=5分，♠10=10分，♠K=10分
 func isScoringCard(card Card) bool {
 	if card.Type == "joker" {
 		return true // Jokers are worth points
 	}
-	if card.Value == "5" {
-		return true // 5s are worth 5 points
-	}
-	if card.Value == "10" || card.Value == "K" {
-		return true // 10s and Ks are worth 10 points
+	// 只有黑桃的5、10、K是分值牌
+	if card.Suit == "spades" {
+		if card.Value == "5" {
+			return true // ♠5 = 5分
+		}
+		if card.Value == "10" || card.Value == "K" {
+			return true // ♠10, ♠K = 10分
+		}
 	}
 	return false
+}
+
+// getCardPoints returns the point value of a scoring card
+// 规则：♠5=5分，♠10=10分，♠K=10分，大王=20分，小王=10分
+func getCardPoints(card Card) int {
+	if card.Type == "joker" {
+		if card.Value == "big" {
+			return 20 // 大王 = 20分
+		}
+		return 10 // 小王 = 10分
+	}
+	// 只有黑桃的5、10、K是分值牌
+	if card.Suit == "spades" {
+		if card.Value == "5" {
+			return 5 // ♠5 = 5分
+		}
+		if card.Value == "10" || card.Value == "K" {
+			return 10 // ♠10, ♠K = 10分
+		}
+	}
+	return 0
 }
 
 // GetPlayerHand returns a player's hand (only for that player)
@@ -482,23 +537,33 @@ func StartSinglePlayerGame(gameID, hostID string) (*GameTable, error) {
 	// Deal cards
 	hands, bottomCards := DealCards(5)
 
+	// 单人模式：玩家1是庄家（起始发牌人）
+	startingDealer := 1
+
 	// Initialize game table
 	table := &GameTable{
-		GameID:         gameID,
-		HostID:         hostID,
-		Status:         "playing",
-		CurrentLevel:   game.CurrentLevel,
-		TrumpSuit:      "",
-		HostCalledCard: nil,
-		FriendRevealed: false,
-		BottomCards:    bottomCards,
-		CurrentPlayer:  1, // Human player leads first
-		TrickLeader:    1,
-		CurrentTrick:   make([]PlayedCard, 0),
-		TricksWon:      make([][]Card, 0),
-		PlayerHands:    make(map[int]*PlayerHand),
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		GameID:             gameID,
+		HostID:             hostID,
+		Status:             "calling", // 进入抢庄阶段
+		CurrentLevel:       game.CurrentLevel,
+		TrumpSuit:          "",
+		HostCalledCard:     nil,
+		FriendRevealed:     false,
+		BottomCards:        bottomCards,
+		CurrentPlayer:      startingDealer,
+		TrickLeader:        startingDealer,
+		CurrentTrick:       make([]PlayedCard, 0),
+		TricksWon:          make([][]Card, 0),
+		PlayerHands:        make(map[int]*PlayerHand),
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		StartingDealerSeat: startingDealer,
+		CurrentCaller:      startingDealer,
+		CallPhase:          "counting",
+		CallCountdown:      10,
+		TrumpRank:          game.CurrentLevel,
+		FlippedBottomCards: make([]Card, 0),
+		CallRecords:        make([]CallRecord, 0),
 	}
 
 	// Assign cards to players (seat 1 is human, 2-5 are AI)
@@ -800,42 +865,59 @@ func DealCards(playerCount int) ([][]Card, []Card) {
 }
 
 // CalculateLevelUp determines how many levels to advance based on score
+// 规则：60分一级，总分300分
+// 正常局升级表（庄家找到盟友，2打3）
+// | 抓分范围 | 结果 | 庄家方升级 | 抓分方升级 |
+// | 0 分 | 大光 | 连升 3 级 | 不升级 |
+// | 1 - 59 分 | 小光 | 连升 2 级 | 不升级 |
+// | 60 - 119 分 | 小胜 | 升 1 级 | 不升级 |
+// | 120 - 179 分 | 反超 | 不升级 | 每人升 1 级 |
+// | 180 - 239 分 | 大胜 | 不升级 | 每人升 2 级 |
+// | 240 - 299 分 | 完胜 | 不升级 | 每人升 3 级 |
+// | 300 分 | 满光 | 不升级 | 每人升 4 级 |
+//
+// 独打局升级表（庄家 1 打 4）
+// | 抓分范围 | 结果 | 庄家升级 | 抓分方升级 |
+// | 0 - 59 分 | 独赢 | 升 4 级 | 不升级 |
+// | 60 - 119 分 | 险胜 | 升 2 级 | 不升级 |
+// | 120 - 179 分 | 反超 | 不升级 | 每人升 1 级 |
+// | 180 分及以上 | 惨败 | 不升级 | 每人升 2 级 |
 func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
 	if isSolo {
-		// Solo game (1 vs 4)
+		// 独打局（庄家 1 打 4）
 		if winnerIsDefender {
-			// Solo winner (defender)
+			// 庄家（防守方）获胜
 			if score <= 59 {
-				return 4
+				return 4 // 独赢，升 4 级
 			}
-			return 2
+			return 2 // 险胜，升 2 级
 		} else {
-			// Attackers won
+			// 抓分方获胜
 			if score >= 180 {
-				return 2
+				return 2 // 惨败，抓分方每人升 2 级
 			}
-			return 1
+			return 1 // 反超，抓分方每人升 1 级
 		}
 	} else {
-		// Normal game (2 vs 3)
+		// 正常局（庄家找到盟友，2 打 3）
 		if winnerIsDefender {
-			// Defender team won
+			// 庄家方获胜
 			if score == 0 {
-				return 3
+				return 3 // 大光，庄家方连升 3 级
 			} else if score <= 59 {
-				return 2
+				return 2 // 小光，庄家方连升 2 级
 			}
-			return 1
+			return 1 // 小胜，庄家方升 1 级
 		} else {
-			// Attacker team won
+			// 抓分方获胜
 			if score >= 300 {
-				return 4
+				return 4 // 满光，抓分方每人升 4 级
 			} else if score >= 240 {
-				return 3
+				return 3 // 完胜，抓分方每人升 3 级
 			} else if score >= 180 {
-				return 2
+				return 2 // 大胜，抓分方每人升 2 级
 			}
-			return 1
+			return 1 // 反超，抓分方每人升 1 级
 		}
 	}
 }
@@ -895,4 +977,750 @@ type GameResult struct {
 	NewLevel string `json:"new_level"`
 	IsWinner bool   `json:"is_winner"`
 	Score    int    `json:"score"`
+}
+
+// PlayCardsGame plays multiple cards from a player's hand
+func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error) {
+	table, err := GetTableGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if table.Status != "playing" {
+		return nil, fmt.Errorf("game not in playing state")
+	}
+
+	// Find player's seat
+	var playerSeat int
+	var hand *PlayerHand
+	for seat, h := range table.PlayerHands {
+		if h.UserID == userID {
+			playerSeat = seat
+			hand = h
+			break
+		}
+	}
+
+	if hand == nil {
+		return nil, fmt.Errorf("player not in game")
+	}
+
+	if playerSeat != table.CurrentPlayer {
+		return nil, fmt.Errorf("not your turn")
+	}
+
+	// Validate card indices
+	if len(cardIndices) == 0 {
+		return nil, fmt.Errorf("no cards selected")
+	}
+
+	// Validate all card indices
+	for _, idx := range cardIndices {
+		if idx < 0 || idx >= len(hand.Cards) {
+			return nil, fmt.Errorf("invalid card index: %d", idx)
+		}
+	}
+
+	// Get the cards to be played
+	var cardsToPlay []Card
+	for _, idx := range cardIndices {
+		cardsToPlay = append(cardsToPlay, hand.Cards[idx])
+	}
+
+	// Validate the play (must be valid combination)
+	fmt.Printf("DEBUG: Validating %d cards: %+v\n", len(cardsToPlay), cardsToPlay)
+	if err := validateCardPlay(cardsToPlay, table); err != nil {
+		fmt.Printf("DEBUG: Validation failed: %v\n", err)
+		return nil, err
+	}
+
+	// Check for friend reveal with first card
+	if !table.FriendRevealed && table.HostCalledCard != nil && len(cardsToPlay) > 0 {
+		if cardsToPlay[0].Suit == table.HostCalledCard.Suit && cardsToPlay[0].Value == table.HostCalledCard.Value {
+			table.FriendRevealed = true
+			table.FriendSeat = playerSeat
+			hand.IsFriend = true
+		}
+	}
+
+	// Remove cards from hand (remove in reverse order to preserve indices)
+	sort.Slice(cardIndices, func(i, j int) bool { return cardIndices[i] > cardIndices[j] })
+	for _, idx := range cardIndices {
+		hand.Cards = append(hand.Cards[:idx], hand.Cards[idx+1:]...)
+	}
+
+	// Add all played cards to current trick
+	isLead := len(table.CurrentTrick) == 0
+	if isLead {
+		table.TrickLeader = playerSeat
+	}
+
+	for _, card := range cardsToPlay {
+		table.CurrentTrick = append(table.CurrentTrick, PlayedCard{
+			Card:      card,
+			Seat:      playerSeat,
+			IsLead:    isLead,
+			Timestamp: time.Now().UnixNano(),
+		})
+	}
+
+	table.UpdatedAt = time.Now()
+
+	result := &PlayResult{
+		Success: true,
+		Message: fmt.Sprintf("Played %d cards", len(cardsToPlay)),
+	}
+
+	// Check if trick is complete (5 cards played - considering pairs/triples count as one play)
+	if len(table.CurrentTrick) >= 5 {
+		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit)
+		result.TrickComplete = true
+		result.TrickWinner = winner
+
+		// Collect scoring cards
+		var collectedCards []Card
+		for _, pc := range table.CurrentTrick {
+			if isScoringCard(pc.Card) {
+				collectedCards = append(collectedCards, pc.Card)
+			}
+		}
+
+		// Winner gets the cards
+		if winnerHand, ok := table.PlayerHands[winner]; ok {
+			winnerHand.Collected = append(winnerHand.Collected, collectedCards...)
+		}
+
+		// Store all played cards in tricks won
+		var trickCards []Card
+		for _, pc := range table.CurrentTrick {
+			trickCards = append(trickCards, pc.Card)
+		}
+		table.TricksWon = append(table.TricksWon, trickCards)
+
+		// Clear trick and set winner as next leader
+		table.CurrentTrick = make([]PlayedCard, 0)
+		table.CurrentPlayer = winner
+		table.TrickLeader = winner
+	} else {
+		// Next player
+		result.NextPlayer = playerSeat%5 + 1
+		table.CurrentPlayer = result.NextPlayer
+	}
+
+	table.LastPlay = result
+	return result, nil
+}
+
+// validateCardPlay validates if the selected cards form a valid play
+func validateCardPlay(cards []Card, table *GameTable) error {
+	if len(cards) == 0 {
+		return fmt.Errorf("no cards to play")
+	}
+
+	// Check if this is the first play of the trick
+	isLead := len(table.CurrentTrick) == 0
+
+	if isLead {
+		// Leading: can play single card, pair, triple, or tractor
+		return validateLeadPlay(cards)
+	} else {
+		// Following: must follow the lead card type
+		return validateFollowPlay(cards, table)
+	}
+}
+
+// validateLeadPlay validates a lead play
+func validateLeadPlay(cards []Card) error {
+	if len(cards) == 1 {
+		// Single card is always valid
+		return nil
+	}
+
+	// Check for tractor (consecutive pairs of same suit)
+	if len(cards) >= 4 && len(cards)%2 == 0 {
+		if err := validateTractor(cards); err == nil {
+			return nil // Valid tractor
+		}
+		// If not a valid tractor, continue to check pair/triple
+	}
+
+	// For pairs and triples, all cards must have same value AND same suit
+	firstValue := cards[0].Value
+	firstSuit := cards[0].Suit
+
+	for _, card := range cards {
+		if card.Value != firstValue {
+			return fmt.Errorf("all cards must have the same value for pairs/triples")
+		}
+		if card.Suit != firstSuit {
+			return fmt.Errorf("all cards must have the same suit for pairs/triples")
+		}
+	}
+
+	// Pair (2 cards) or Triple (3 cards) with same value and suit is valid
+	return nil
+}
+
+// validateTractor validates if cards form a tractor (consecutive pairs of same suit)
+func validateTractor(cards []Card) error {
+	// Tractor must have even number of cards (at least 4)
+	if len(cards) < 4 || len(cards)%2 != 0 {
+		return fmt.Errorf("tractor must have at least 4 cards (2 pairs)")
+	}
+
+	// All cards must have the same suit
+	firstSuit := cards[0].Suit
+	for _, card := range cards {
+		if card.Suit != firstSuit {
+			return fmt.Errorf("all cards in tractor must have the same suit")
+		}
+	}
+
+	// Count occurrences of each value
+	valueCounts := make(map[string]int)
+	for _, card := range cards {
+		valueCounts[card.Value]++
+	}
+
+	// Each value must appear exactly 2 times (pairs)
+	for _, count := range valueCounts {
+		if count != 2 {
+			return fmt.Errorf("tractor consists of consecutive pairs, each value must appear exactly 2 times")
+		}
+	}
+
+	// Check if values are consecutive
+	values := make([]string, 0, len(valueCounts))
+	for value := range valueCounts {
+		values = append(values, value)
+	}
+
+	// Sort values by their numeric order
+	sort.Slice(values, func(i, j int) bool {
+		return getCardNumericValue(values[i]) < getCardNumericValue(values[j])
+	})
+
+	// Check if values are consecutive
+	for i := 1; i < len(values); i++ {
+		prevValue := getCardNumericValue(values[i-1])
+		currValue := getCardNumericValue(values[i])
+		if currValue != prevValue+1 {
+			return fmt.Errorf("tractor values must be consecutive (e.g., 10-J-Q)")
+		}
+	}
+
+	return nil
+}
+
+// getCardNumericValue returns the numeric value for sorting and comparison
+func getCardNumericValue(value string) int {
+	values := map[string]int{
+		"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+		"J": 11, "Q": 12, "K": 13, "A": 14,
+	}
+	return values[value]
+}
+
+// validateFollowPlay validates following a lead
+// 跟牌优先级：
+// 1. 相同牌型、相同数量
+// 2. 相同花色的对子
+// 3. 相同花色的单张
+// 4. 垫任意其他牌（毙牌）
+func validateFollowPlay(cards []Card, table *GameTable) error {
+	if len(table.CurrentTrick) == 0 {
+		return fmt.Errorf("no lead to follow")
+	}
+
+	// Get the lead play
+	leadPlay := table.CurrentTrick[0].Card
+	leadSuit := leadPlay.Suit
+	leadSeat := table.CurrentTrick[0].Seat
+
+	// Count how many cards the leader played and what type
+	leadCards := []Card{}
+	for _, pc := range table.CurrentTrick {
+		if pc.Seat == leadSeat {
+			leadCards = append(leadCards, pc.Card)
+		} else {
+			break
+		}
+	}
+
+	leadCardCount := len(leadCards)
+
+	// Must play same number of cards
+	if len(cards) != leadCardCount {
+		return fmt.Errorf("must play %d cards", leadCardCount)
+	}
+
+	// Determine lead play type
+	isLeadPair := leadCardCount == 2 && leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit
+	isLeadTriple := leadCardCount == 3 && leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value && leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit
+
+	// Check if player's cards form a pair/triple
+	isPlayerPair := leadCardCount == 2 && cards[0].Value == cards[1].Value && cards[0].Suit == cards[1].Suit
+	isPlayerTriple := leadCardCount == 3 && cards[0].Value == cards[1].Value && cards[1].Value == cards[2].Value && cards[0].Suit == cards[1].Suit && cards[1].Suit == cards[2].Suit
+
+	// 跟牌规则优先级：
+	// 1. 相同牌型、相同数量
+	if isLeadPair && isPlayerPair {
+		if cards[0].Suit == leadSuit {
+			return nil // 相同牌型、相同花色
+		}
+		return fmt.Errorf("相同牌型必须跟相同花色")
+	}
+	if isLeadTriple && isPlayerTriple {
+		if cards[0].Suit == leadSuit {
+			return nil // 相同牌型、相同花色
+		}
+		return fmt.Errorf("相同牌型必须跟相同花色")
+	}
+
+	// 2. 相同花色的对子（如果领出的是对子或三张）
+	if (isLeadPair || isLeadTriple) && !isPlayerPair && !isPlayerTriple {
+		// 检查是否有相同花色的对子
+		if hasPairInSuit(cards, leadSuit) {
+			return fmt.Errorf("有相同花色的对子，必须跟对子")
+		}
+	}
+
+	// 3. 相同花色的单张
+	return validateSingleSuitFollow(cards, leadSuit)
+}
+
+// hasPairInSuit checks if player has a pair in the given suit
+func hasPairInSuit(cards []Card, suit string) bool {
+	suitCards := make(map[string]int)
+	for _, card := range cards {
+		if card.Suit == suit {
+			suitCards[card.Value]++
+		}
+	}
+	for _, count := range suitCards {
+		if count >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSingleSuitFollow validates following with single cards (when can't match pair/triple)
+func validateSingleSuitFollow(cards []Card, leadSuit string) error {
+	// Check if player has any card of lead suit
+	hasLeadSuit := false
+	for _, card := range cards {
+		if card.Suit == leadSuit {
+			hasLeadSuit = true
+			break
+		}
+	}
+
+	if hasLeadSuit {
+		// If player has lead suit, all played cards must be of lead suit
+		for _, card := range cards {
+			if card.Suit != leadSuit {
+				return fmt.Errorf("must follow suit if possible")
+			}
+		}
+	}
+
+	return nil
+}
+
+// ==================== 抢庄相关函数 ====================
+
+// CallDealer handles a player calling for dealer (抢庄)
+// 玩家用级牌叫庄，决定主牌花色
+func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTable, error) {
+	table, err := GetTableGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if table.Status != "calling" {
+		return nil, fmt.Errorf("game not in calling phase")
+	}
+
+	// Find player's seat
+	var playerSeat int
+	var hand *PlayerHand
+	for seat, h := range table.PlayerHands {
+		if h.UserID == userID {
+			playerSeat = seat
+			hand = h
+			break
+		}
+	}
+
+	if hand == nil {
+		return nil, fmt.Errorf("player not in game")
+	}
+
+	if table.CallPhase != "counting" {
+		return nil, fmt.Errorf("not in countdown phase")
+	}
+
+	// Validate card indices and check they are rank cards
+	rank := table.TrumpRank // 当前级牌点数（如"2"）
+	var cardsToPlay []Card
+	for _, idx := range cardIndices {
+		if idx < 0 || idx >= len(hand.Cards) {
+			return nil, fmt.Errorf("invalid card index")
+		}
+		card := hand.Cards[idx]
+		// 检查是否是级牌
+		if card.Value != rank {
+			return nil, fmt.Errorf("只能用级牌叫庄")
+		}
+		cardsToPlay = append(cardsToPlay, card)
+	}
+
+	// 检查是否是同花色的级牌
+	firstSuit := cardsToPlay[0].Suit
+	for _, card := range cardsToPlay {
+		if card.Suit != firstSuit {
+			return nil, fmt.Errorf("叫庄的级牌必须是同花色")
+		}
+	}
+
+	// 记录叫庄
+	table.CallRecords = append(table.CallRecords, CallRecord{
+		Seat:      playerSeat,
+		Suit:      suit,
+		Rank:      rank,
+		Count:     len(cardsToPlay),
+		Timestamp: time.Now().UnixNano(),
+	})
+
+	// 检查反庄（如果之前已经有人叫庄）
+	if len(table.CallRecords) > 1 {
+		lastCall := table.CallRecords[len(table.CallRecords)-2]
+		// 反庄规则：
+		// 1. 同花色反：使用相同花色、相同点数的级牌，张数必须更多
+		// 2. 升级反：使用比当前级牌高1级或以上的级牌
+		if suit == lastCall.Suit && rank == lastCall.Rank {
+			// 同花色反，张数必须更多
+			if len(cardsToPlay) <= lastCall.Count {
+				return nil, fmt.Errorf("反庄张数必须多于当前叫庄")
+			}
+			if len(cardsToPlay) > 3 {
+				return nil, fmt.Errorf("反主最多3张")
+			}
+		} else {
+			// 升级反
+			// 检查是否是更高级的牌
+			currentRankValue := getCardNumericValue(lastCall.Rank)
+			newRankValue := getCardNumericValue(rank)
+			if newRankValue <= currentRankValue {
+				return nil, fmt.Errorf("升级反必须用更高级的牌")
+			}
+		}
+	}
+
+	// 设置庄家和主牌花色
+	table.DealerSeat = playerSeat
+	table.TrumpSuit = suit
+	table.HostID = table.PlayerHands[playerSeat].UserID
+	table.CallPhase = "finished"
+
+	// 如果是单人模式，直接进入找朋友阶段
+	if isSinglePlayerGame(table) {
+		return finalizeDealerAndStartPlaying(table)
+	}
+
+	table.UpdatedAt = time.Now()
+	return table, nil
+}
+
+// isSinglePlayerGame checks if this is a single player game
+func isSinglePlayerGame(table *GameTable) bool {
+	aiCount := 0
+	for _, hand := range table.PlayerHands {
+		if len(hand.UserID) >= 3 && hand.UserID[:3] == "ai_" {
+			aiCount++
+		}
+	}
+	return aiCount == 4
+}
+
+// FlipBottomCard handles flipping a card from the bottom to determine dealer
+// 翻底牌定庄
+func FlipBottomCard(gameID string) (*GameTable, error) {
+	table, err := GetTableGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if table.Status != "calling" {
+		return nil, fmt.Errorf("game not in calling phase")
+	}
+
+	if table.CallPhase != "flipping" {
+		return nil, fmt.Errorf("not in flipping phase")
+	}
+
+	if len(table.FlippedBottomCards) >= len(table.BottomCards) {
+		return nil, fmt.Errorf("all bottom cards have been flipped")
+	}
+
+	// 翻开下一张底牌
+	nextCard := table.BottomCards[len(table.FlippedBottomCards)]
+	table.FlippedBottomCards = append(table.FlippedBottomCards, nextCard)
+
+	// 检查是否翻到了级牌
+	rank := table.TrumpRank
+	if nextCard.Value == rank {
+		// 找到了级牌，确定庄家
+		// 找出所有打这个级别的玩家，按逆时针顺序选择距离起始发牌人最近的
+		var candidates []int
+		for seat, hand := range table.PlayerHands {
+			// 检查玩家的等级
+			user, err := GetUserByID(hand.UserID)
+			if err == nil && user.Level == rank {
+				candidates = append(candidates, seat)
+			}
+		}
+
+		if len(candidates) > 0 {
+			// 按逆时针顺序找最近的
+			selectedSeat := findClosestSeatCounterClockwise(table.StartingDealerSeat, candidates)
+			table.DealerSeat = selectedSeat
+			table.TrumpSuit = nextCard.Suit
+			table.HostID = table.PlayerHands[selectedSeat].UserID
+			table.CallPhase = "finished"
+
+			return finalizeDealerAndStartPlaying(table)
+		}
+	}
+
+	// 如果翻完了所有底牌还没定庄，则首发人当庄
+	if len(table.FlippedBottomCards) >= len(table.BottomCards) {
+		table.DealerSeat = table.StartingDealerSeat
+		table.TrumpSuit = table.BottomCards[len(table.BottomCards)-1].Suit
+		table.HostID = table.PlayerHands[table.StartingDealerSeat].UserID
+		table.CallPhase = "finished"
+
+		return finalizeDealerAndStartPlaying(table)
+	}
+
+	table.UpdatedAt = time.Now()
+	return table, nil
+}
+
+// findClosestSeatCounterClockwise finds the closest seat going counter-clockwise
+// 从起始发牌人开始，按逆时针顺序找最近的玩家
+func findClosestSeatCounterClockwise(startingSeat int, candidates []int) int {
+	if len(candidates) == 0 {
+		return startingSeat
+	}
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+
+	// 按逆时针顺序检查（逆时针：1->5->4->3->2->1）
+	// 也就是顺时针的反方向
+	for i := 0; i < 5; i++ {
+		seat := ((startingSeat - 1 - i + 5) % 5) + 1
+		for _, candidate := range candidates {
+			if candidate == seat {
+				return candidate
+			}
+		}
+	}
+
+	return candidates[0]
+}
+
+// finalizeDealerAndStartPlaying finalizes dealer selection and starts the playing phase
+func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
+	// 庄家收取底牌
+	if dealerHand, ok := table.PlayerHands[table.DealerSeat]; ok {
+		// 将底牌加入庄家手牌（后续需要扣回7张）
+		for _, card := range table.BottomCards {
+			dealerHand.Cards = append(dealerHand.Cards, card)
+		}
+	}
+
+	table.Status = "playing"
+	table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+	table.UpdatedAt = time.Now()
+
+	return table, nil
+}
+
+// ==================== 抠底相关函数 ====================
+
+// BottomCardMultiplier represents the multiplier for bottom cards
+type BottomCardMultiplier struct {
+	Multiplier int    `json:"multiplier"`
+	Reason     string `json:"reason"`
+}
+
+// CalculateBottomMultiplier calculates the multiplier for bottom cards based on the last trick
+// 抠底倍数计算：
+// - 单张抠底：×1
+// - 对子抠底：×2
+// - 三张抠底：×4
+// - 拖拉机抠底：对应牌型翻倍
+func CalculateBottomMultiplier(lastTrick []PlayedCard, trumpSuit string) BottomCardMultiplier {
+	if len(lastTrick) == 0 {
+		return BottomCardMultiplier{Multiplier: 0, Reason: "没有出牌"}
+	}
+
+	// 获取最后一轮的领出牌
+	leadSeat := lastTrick[0].Seat
+	var leadCards []Card
+	for _, pc := range lastTrick {
+		if pc.Seat == leadSeat {
+			leadCards = append(leadCards, pc.Card)
+		} else {
+			break
+		}
+	}
+
+	leadCount := len(leadCards)
+
+	// 检查牌型
+	if leadCount == 1 {
+		return BottomCardMultiplier{Multiplier: 1, Reason: "单张抠底"}
+	}
+
+	if leadCount == 2 {
+		// 检查是否是对子
+		if leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit {
+			return BottomCardMultiplier{Multiplier: 2, Reason: "对子抠底"}
+		}
+	}
+
+	if leadCount == 3 {
+		// 检查是否是三张
+		if leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value &&
+			leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit {
+			return BottomCardMultiplier{Multiplier: 4, Reason: "三张抠底"}
+		}
+	}
+
+	if leadCount >= 4 && leadCount%2 == 0 {
+		// 检查是否是拖拉机（连对）
+		if isValidTractor(leadCards) {
+			pairCount := leadCount / 2
+			return BottomCardMultiplier{Multiplier: pairCount, Reason: fmt.Sprintf("拖拉机抠底（%d对）", pairCount)}
+		}
+	}
+
+	// 默认单张
+	return BottomCardMultiplier{Multiplier: 1, Reason: "单张抠底"}
+}
+
+// isValidTractor checks if cards form a valid tractor
+func isValidTractor(cards []Card) bool {
+	if len(cards) < 4 || len(cards)%2 != 0 {
+		return false
+	}
+
+	// 检查是否同花色
+	firstSuit := cards[0].Suit
+	for _, card := range cards {
+		if card.Suit != firstSuit {
+			return false
+		}
+	}
+
+	// 检查是否每两张都是对子
+	for i := 0; i < len(cards); i += 2 {
+		if cards[i].Value != cards[i+1].Value {
+			return false
+		}
+	}
+
+	// 检查是否是连续的对子
+	valueCounts := make(map[string]int)
+	for _, card := range cards {
+		valueCounts[card.Value]++
+	}
+
+	// 每个值应该出现2次
+	for _, count := range valueCounts {
+		if count != 2 {
+			return false
+		}
+	}
+
+	// 检查是否连续
+	values := make([]string, 0, len(valueCounts))
+	for value := range valueCounts {
+		values = append(values, value)
+	}
+
+	sort.Slice(values, func(i, j int) bool {
+		return getCardNumericValue(values[i]) < getCardNumericValue(values[j])
+	})
+
+	for i := 1; i < len(values); i++ {
+		prevValue := getCardNumericValue(values[i-1])
+		currValue := getCardNumericValue(values[i])
+		if currValue != prevValue+1 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// CalculateBottomCardsScore calculates the total score from bottom cards with multiplier
+func CalculateBottomCardsScore(bottomCards []Card, multiplier int) int {
+	if multiplier == 0 {
+		return 0
+	}
+
+	totalScore := 0
+	for _, card := range bottomCards {
+		totalScore += getCardPoints(card)
+	}
+
+	return totalScore * multiplier
+}
+
+// AutoCallForDealer 自动为AI玩家叫庄（单人模式）
+func AutoCallForDealer(gameID string) (*GameTable, error) {
+	table, err := GetTableGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if table.Status != "calling" && table.Status != "playing" {
+		return nil, fmt.Errorf("game not in calling phase")
+	}
+
+	if table.TrumpSuit != "" {
+		// Already has trump suit, skip
+		return table, nil
+	}
+
+	// 在单人模式中，玩家1（人类）是庄家，直接使用人类玩家的最长花色作为主牌
+	if hand, ok := table.PlayerHands[1]; ok {
+		// 找出最长的花色
+		suitCounts := make(map[string]int)
+		for _, card := range hand.Cards {
+			suitCounts[card.Suit]++
+		}
+
+		longestSuit := ""
+		maxCount := 0
+		for suit, count := range suitCounts {
+			if count > maxCount && suit != "joker" {
+				maxCount = count
+				longestSuit = suit
+			}
+		}
+
+		table.DealerSeat = 1
+		table.TrumpSuit = longestSuit
+		table.CallPhase = "finished"
+
+		return finalizeDealerAndStartPlaying(table)
+	}
+
+	return nil, fmt.Errorf("human player not found")
 }

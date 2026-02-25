@@ -60,6 +60,8 @@ func main() {
 			protected.POST("/game/:id/start", handlers.StartGameHandler)
 			protected.POST("/game/:id/start-single", handlers.StartSinglePlayerGame)
 			protected.POST("/game/:id/call-friend", handlers.CallFriendHandler)
+			protected.POST("/game/:id/call-dealer", handlers.CallDealerHandler)
+			protected.POST("/game/:id/flip-bottom", handlers.FlipBottomCardHandler)
 			protected.POST("/game/:id/play", handlers.PlayCard)
 			protected.POST("/game/:id/ai-play", handlers.AIPlayHandler)
 		}

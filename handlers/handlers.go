@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"leve_up/middleware"
 	"leve_up/models"
 	"log"
@@ -220,7 +221,7 @@ func JoinGame(c *gin.Context) {
 	})
 }
 
-// PlayCard handles playing a card
+// PlayCard handles playing a card or multiple cards
 func PlayCard(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
 	gameID := c.Param("id")
@@ -230,13 +231,32 @@ func PlayCard(c *gin.Context) {
 		return
 	}
 
-	cardIndex := 0
-	if data["cardIndex"] != "" {
+	// Support both old single card and new multi-card formats
+	var cardIndices []int
+
+	if data["cardIndices"] != "" {
+		// New format: comma-separated indices
+		indexStrs := strings.Split(data["cardIndices"], ",")
+		for _, idxStr := range indexStrs {
+			var idx int
+			fmt.Sscanf(strings.TrimSpace(idxStr), "%d", &idx)
+			cardIndices = append(cardIndices, idx)
+		}
+	} else if data["cardIndex"] != "" {
+		// Old format: single index
+		var cardIndex int
 		fmt.Sscanf(data["cardIndex"], "%d", &cardIndex)
+		cardIndices = []int{cardIndex}
 	}
 
-	result, err := models.PlayCardGame(gameID, user.ID, cardIndex)
+	if len(cardIndices) == 0 {
+		middleware.SendError(c, http.StatusBadRequest, "No card indices provided")
+		return
+	}
+
+	result, err := models.PlayCardsGame(gameID, user.ID, cardIndices)
 	if err != nil {
+		fmt.Printf("PlayCardsGame error: %v, cardIndices: %v\n", err, cardIndices)
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -261,6 +281,7 @@ func StartGameHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
+		"message": "游戏开始，请抢庄",
 	})
 }
 
@@ -291,6 +312,68 @@ func CallFriendHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Friend card called",
+	})
+}
+
+// CallDealerHandler handles a player calling for dealer (抢庄)
+func CallDealerHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	data, ok := middleware.ParseForm(c)
+	if !ok {
+		return
+	}
+
+	suit := data["suit"]
+
+	// 解析牌的索引
+	var cardIndices []int
+	if data["cardIndices"] != "" {
+		indexStrs := strings.Split(data["cardIndices"], ",")
+		for _, idxStr := range indexStrs {
+			var idx int
+			fmt.Sscanf(strings.TrimSpace(idxStr), "%d", &idx)
+			cardIndices = append(cardIndices, idx)
+		}
+	}
+
+	if suit == "" {
+		middleware.SendError(c, http.StatusBadRequest, "suit is required")
+		return
+	}
+
+	if len(cardIndices) == 0 {
+		middleware.SendError(c, http.StatusBadRequest, "cardIndices is required")
+		return
+	}
+
+	table, err := models.CallDealer(gameID, user.ID, suit, cardIndices)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "抢庄成功",
+	})
+}
+
+// FlipBottomCardHandler handles flipping a card from the bottom
+func FlipBottomCardHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, err := models.FlipBottomCard(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
 	})
 }
 
@@ -327,6 +410,13 @@ func StartSinglePlayerGame(c *gin.Context) {
 	gameID := c.Param("id")
 
 	table, err := models.StartSinglePlayerGame(gameID, user.ID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 自动为玩家抢庄（单人模式）
+	table, err = models.AutoCallForDealer(gameID)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
@@ -375,6 +465,27 @@ func GetGameTableHandler(c *gin.Context) {
 		return
 	}
 
+	// Build players list with card counts
+	players := make([]map[string]interface{}, 0)
+	for seat := 1; seat <= 5; seat++ {
+		if hand, ok := table.PlayerHands[seat]; ok {
+			playerInfo := map[string]interface{}{
+				"seat":      seat,
+				"cardCount": len(hand.Cards),
+				"isFriend":  hand.IsFriend,
+			}
+			// Check if this is an AI player
+			if hand.UserID[:3] == "ai_" {
+				playerInfo["isAI"] = true
+				playerInfo["username"] = fmt.Sprintf("AI-%d", seat)
+			} else {
+				playerInfo["isAI"] = false
+				playerInfo["userId"] = hand.UserID
+			}
+			players = append(players, playerInfo)
+		}
+	}
+
 	// Only include current player's hand
 	response := map[string]interface{}{
 		"success":        true,
@@ -388,6 +499,7 @@ func GetGameTableHandler(c *gin.Context) {
 		"currentPlayer":  table.CurrentPlayer,
 		"currentTrick":   table.CurrentTrick,
 		"lastPlay":       table.LastPlay,
+		"players":        players,
 	}
 
 	// Add player's hand if they're in the game
@@ -575,13 +687,15 @@ func GameTablePageHandler(c *gin.Context) {
 	if myHand != nil {
 		handBytes, _ := json.Marshal(myHand)
 		myHandJSON = string(handBytes)
+	} else {
+		myHandJSON = "null"
 	}
 
 	middleware.SendHTML(c, "game_table.html", gin.H{
 		"title":      fmt.Sprintf("%s - 找朋友升级", game.Name),
 		"game":       game,
-		"gameJSON":   string(gameJSON),
-		"myHandJSON": myHandJSON,
+		"gameJSON":   template.HTML(string(gameJSON)),
+		"myHandJSON": template.HTML(myHandJSON),
 		"user":       user,
 		"loggedIn":   true,
 	})
@@ -629,6 +743,13 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 			return
 		}
 
+		// Auto call dealer for single player mode
+		table, err = models.AutoCallForDealer(gameID)
+		if err != nil {
+			middleware.SendError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		// AI calls friend card
 		if table.HostCalledCard == nil {
 			suit, value := models.AICallFriendCard(table.PlayerHands[1].Cards)
@@ -659,10 +780,18 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 			isAI = true
 		}
 
+		// Get player level
+		var playerLevel string
+		if !isAI {
+			playerLevel = user.Level
+		} else {
+			playerLevel = "2" // AI default level
+		}
+
 		playerInfo := map[string]interface{}{
 			"id":       playerID,
 			"username": username,
-			"level":    "2",
+			"level":    playerLevel,
 			"seat":     seat,
 			"isAI":     isAI,
 		}
@@ -704,14 +833,18 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 	if myHand != nil {
 		handBytes, _ := json.Marshal(myHand)
 		myHandJSON = string(handBytes)
+	} else {
+		myHandJSON = "null"
 	}
 
 	middleware.SendHTML(c, "singleplayer_game.html", gin.H{
-		"title":      fmt.Sprintf("%s - 单人模式", game.Name),
-		"game":       game,
-		"gameJSON":   string(gameJSON),
-		"myHandJSON": myHandJSON,
-		"user":       user,
-		"loggedIn":   true,
+		"title":        fmt.Sprintf("%s - 单人模式", game.Name),
+		"gameID":       gameID,
+		"game":         game,
+		"currentLevel": table.CurrentLevel,
+		"gameJSON":     template.HTML(string(gameJSON)),
+		"myHandJSON":   template.HTML(myHandJSON),
+		"user":         user,
+		"loggedIn":     true,
 	})
 }

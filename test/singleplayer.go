@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"time"
 )
 
@@ -105,15 +105,15 @@ func main() {
 	fmt.Printf("\n访问单人游戏: %s/game/singleplayer/%s\n", baseURL, gameID)
 }
 
-func post(client *http.Client, url string, data map[string]string) (*http.Response, error) {
+func post(client *http.Client, urlStr string, data map[string]string) (*http.Response, error) {
 	formData := &bytes.Buffer{}
 	for key, value := range data {
 		if formData.Len() > 0 {
 			formData.WriteString("&")
 		}
-		formData.WriteString(fmt.Sprintf("%s=%s", key, url.QueryEscape(value)))
+		formData.WriteString(fmt.Sprintf("%s=%s", key, neturl.QueryEscape(value)))
 	}
-	req, err := http.NewRequest("POST", url, formData)
+	req, err := http.NewRequest("POST", urlStr, formData)
 	if err != nil {
 		return nil, err
 	}
