@@ -62,6 +62,7 @@ func main() {
 			protected.POST("/game/:id/call-friend", handlers.CallFriendHandler)
 			protected.POST("/game/:id/call-dealer", handlers.CallDealerHandler)
 			protected.POST("/game/:id/flip-bottom", handlers.FlipBottomCardHandler)
+			protected.POST("/game/:id/discard-bottom", handlers.DiscardBottomCardsHandler)
 			protected.POST("/game/:id/play", handlers.PlayCard)
 			protected.POST("/game/:id/ai-play", handlers.AIPlayHandler)
 		}

@@ -1542,8 +1542,71 @@ func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
 		}
 	}
 
+	// 进入扣牌阶段，庄家需要从手牌中选择7张牌扣回底牌
+	table.Status = "discarding"
+	table.CallPhase = "discarding"
+	table.UpdatedAt = time.Now()
+
+	return table, nil
+}
+
+// DiscardBottomCards 庄家扣牌（选择7张牌扣回底牌）
+func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameTable, error) {
+	table, err := GetTableGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if table.Status != "discarding" {
+		return nil, fmt.Errorf("game not in discarding phase")
+	}
+
+	// 验证只有庄家可以扣牌
+	dealerHand, ok := table.PlayerHands[table.DealerSeat]
+	if !ok || dealerHand.UserID != userID {
+		return nil, fmt.Errorf("only dealer can discard cards")
+	}
+
+	// 验证选择了7张牌
+	if len(cardIndices) != 7 {
+		return nil, fmt.Errorf("must select exactly 7 cards to discard")
+	}
+
+	// 验证索引有效性
+	for _, idx := range cardIndices {
+		if idx < 0 || idx >= len(dealerHand.Cards) {
+			return nil, fmt.Errorf("invalid card index: %d", idx)
+		}
+	}
+
+	// 收集要扣的牌
+	var discardedCards []Card
+	usedIndices := make(map[int]bool)
+	for _, idx := range cardIndices {
+		if usedIndices[idx] {
+			return nil, fmt.Errorf("duplicate card index: %d", idx)
+		}
+		usedIndices[idx] = true
+		discardedCards = append(discardedCards, dealerHand.Cards[idx])
+	}
+
+	// 从庄家手牌中移除扣的牌
+	newHandCards := make([]Card, 0, len(dealerHand.Cards)-7)
+	for i, card := range dealerHand.Cards {
+		if !usedIndices[i] {
+			newHandCards = append(newHandCards, card)
+		}
+	}
+	dealerHand.Cards = newHandCards
+	table.PlayerHands[table.DealerSeat] = dealerHand
+
+	// 将扣的牌放回底牌
+	table.BottomCards = discardedCards
+
+	// 进入游戏阶段
 	table.Status = "playing"
 	table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+	table.CallPhase = "finished"
 	table.UpdatedAt = time.Now()
 
 	return table, nil

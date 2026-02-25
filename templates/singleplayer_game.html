@@ -638,6 +638,11 @@ const GAME_ID = "{{.gameID}}";
                 return;
             }
 
+            if (GAME_DATA.status === 'discarding') {
+                handleDiscardingPhase();
+                return;
+            }
+
             renderMyHand();
             updateDisplay();
             updateSelectionCounter();
@@ -657,6 +662,79 @@ const GAME_ID = "{{.gameID}}";
                 setTimeout(() => {
                     autoCallForDealer();
                 }, 1000);
+            }
+        }
+
+        // 处理扣牌阶段
+        function handleDiscardingPhase() {
+            renderMyHand();
+            updateDisplay();
+            updatePlayerInfoPanel();
+
+            // 显示扣牌界面
+            showStatus('请选择7张牌扣回底牌（庄家）');
+            updateSelectionCounter();
+
+            // 单人模式自动扣牌
+            if (GAME_DATA.isSinglePlayer) {
+                setTimeout(() => {
+                    autoDiscardBottomCards();
+                }, 1000);
+            }
+        }
+
+        // 自动扣牌（单人模式）
+        async function autoDiscardBottomCards() {
+            try {
+                // AI自动选择7张牌扣回底牌（选择非主牌的小牌）
+                const myHand = GAME_DATA.myHand;
+                if (!myHand || !myHand.Cards) {
+                    return;
+                }
+
+                // 策略：优先保留级牌和主牌，扣掉其他花色的小牌
+                const trumpSuit = GAME_DATA.trumpSuit;
+                const trumpRank = GAME_DATA.currentLevel;
+
+                // 对牌进行排序，优先保留主牌和级牌
+                const cards = myHand.Cards.map((card, index) => ({...card, originalIndex: index}));
+                cards.sort((a, b) => {
+                    // 主牌优先级最高
+                    const aIsTrump = a.Suit === trumpSuit || a.Value === trumpRank;
+                    const bIsTrump = b.Suit === trumpSuit || b.Value === trumpRank;
+                    if (aIsTrump && !bIsTrump) return 1;
+                    if (!aIsTrump && bIsTrump) return -1;
+
+                    // 大牌优先保留
+                    const aValue = getCardValue(a);
+                    const bValue = getCardValue(b);
+                    return aValue - bValue;
+                });
+
+                // 选择前7张（最不重要的牌）来扣
+                const cardsToDiscard = cards.slice(0, 7);
+                const cardIndices = cardsToDiscard.map(c => c.originalIndex).sort((a, b) => a - b);
+                const cardIndicesStr = cardIndices.join(',');
+
+                const token = localStorage.getItem('token');
+                const response = await fetch(`/api/game/${GAME_ID}/discard-bottom`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams({
+                        cardIndices: cardIndicesStr
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    GAME_DATA = result.table;
+                    renderGame();
+                }
+            } catch (e) {
+                console.error('Auto discard failed:', e);
             }
         }
 
@@ -1038,6 +1116,13 @@ function renderMyHand(preserveOrder = false) {
         function updatePlayButton() {
             const playBtn = document.getElementById('playBtn');
             playBtn.disabled = selectedCardIndices.size === 0 || isProcessing;
+
+            // 根据游戏状态更新按钮文本
+            if (GAME_DATA.status === 'discarding') {
+                playBtn.textContent = selectedCardIndices.size === 7 ? '扣牌' : `扣牌 (${selectedCardIndices.size}/7)`;
+            } else {
+                playBtn.textContent = '出牌';
+            }
         }
 
         async function playSelectedCards() {
@@ -1050,14 +1135,34 @@ function renderMyHand(preserveOrder = false) {
             const cardIndices = Array.from(selectedCardIndices).sort((a, b) => a - b);
 
             try {
+                let endpoint;
+                let body;
+
+                // 根据游戏状态选择不同的API端点
+                if (GAME_DATA.status === 'discarding') {
+                    // 扣牌阶段
+                    if (cardIndices.length !== 7) {
+                        showStatus('请选择7张牌扣回底牌', 2000);
+                        isProcessing = false;
+                        updatePlayButton();
+                        return;
+                    }
+                    endpoint = `/api/game/${GAME_ID}/discard-bottom`;
+                    body = `cardIndices=${cardIndices.join(',')}`;
+                } else {
+                    // 出牌阶段
+                    endpoint = `/api/game/${GAME_ID}/play`;
+                    body = `cardIndices=${cardIndices.join(',')}`;
+                }
+
                 // Send all selected card indices to backend
-                const response = await fetch(`/api/game/${GAME_ID}/play`, {
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: `cardIndices=${cardIndices.join(',')}`
+                    body: body
                 });
 
                 const result = await response.json();
@@ -1079,13 +1184,16 @@ function renderMyHand(preserveOrder = false) {
                         showStatus(`本轮结束！玩家 ${result.result.trickWinner} 获胜`, 2000);
                     }
 
-                    // Small delay to show played card before AI plays
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    // 如果现在是playing状态，继续AI回合
+                    if (GAME_DATA.status === 'playing') {
+                        // Small delay to show played card before AI plays
+                        await new Promise(resolve => setTimeout(resolve, 500));
 
-                    // AI turns
-                    await playAITurns();
+                        // AI turns
+                        await playAITurns();
+                    }
                 } else {
-                    showStatus(result.error || '出牌失败', 2000);
+                    showStatus(result.error || '操作失败', 2000);
                 }
             } catch (e) {
                 console.error('Play card error:', e);
@@ -1213,6 +1321,9 @@ async function refreshGameState() {
 
             // Update trick cards
             updateTrickCards();
+
+            // Update play button text based on game status
+            updatePlayButton();
         }
 
         function updateTrickCards() {

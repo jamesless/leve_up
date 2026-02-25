@@ -377,6 +377,45 @@ func FlipBottomCardHandler(c *gin.Context) {
 	})
 }
 
+// DiscardBottomCardsHandler handles the dealer discarding cards to the bottom
+func DiscardBottomCardsHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	data, ok := middleware.ParseForm(c)
+	if !ok {
+		return
+	}
+
+	// 解析牌的索引
+	var cardIndices []int
+	if data["cardIndices"] != "" {
+		indexStrs := strings.Split(data["cardIndices"], ",")
+		for _, idxStr := range indexStrs {
+			var idx int
+			fmt.Sscanf(strings.TrimSpace(idxStr), "%d", &idx)
+			cardIndices = append(cardIndices, idx)
+		}
+	}
+
+	if len(cardIndices) == 0 {
+		middleware.SendError(c, http.StatusBadRequest, "cardIndices is required")
+		return
+	}
+
+	table, err := models.DiscardBottomCards(gameID, user.ID, cardIndices)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "扣牌成功",
+	})
+}
+
 // CreateSinglePlayerGame creates a single player game with AI opponents
 func CreateSinglePlayerGame(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
