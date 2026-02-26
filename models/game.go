@@ -82,8 +82,10 @@ type CallRecord struct {
 
 // CalledCard represents the card the host calls to find a friend
 type CalledCard struct {
-	Suit  string `json:"suit"`
-	Value string `json:"value"`
+	Suit     string `json:"suit"`
+	Value    string `json:"value"`
+	Position int    `json:"position"` // 第几张被打出（1=第1张，2=第2张，3=第3张）
+	Count    int    `json:"count"`    // 已打出次数计数器
 }
 
 // PlayedCard represents a card played during the game
@@ -96,11 +98,15 @@ type PlayedCard struct {
 
 // PlayResult represents the result of a card play
 type PlayResult struct {
-	Success       bool   `json:"success"`
-	Message       string `json:"message"`
-	NextPlayer    int    `json:"nextPlayer"`
-	TrickComplete bool   `json:"trickComplete"`
-	TrickWinner   int    `json:"trickWinner,omitempty"`
+	Success       bool         `json:"success"`
+	Message       string       `json:"message"`
+	NextPlayer    int          `json:"nextPlayer"`
+	TrickComplete bool         `json:"trickComplete"`
+	TrickWinner   int          `json:"trickWinner,omitempty"`
+	GameEnded     bool         `json:"gameEnded"`
+	WinnerTeam    string       `json:"winnerTeam,omitempty"`
+	FinalScore    int          `json:"finalScore,omitempty"`
+	GameResults   []GameResult `json:"gameResults,omitempty"`
 }
 
 // In-memory game storage (in production, use Redis or similar)
@@ -219,8 +225,9 @@ func GetTableGame(gameID string) (*GameTable, error) {
 }
 
 // CallFriendCard sets the card the host calls to find their friend
-// 如果叫的牌在庄家手中或底牌中，则触发1打4独打模式
-func CallFriendCard(gameID, userID, suit, value string) error {
+// position: 第几张被打出的牌成为盟友（1=第1张，2=第2张，3=第3张）
+// 如果叫的牌在庄家手中或底牌中达不到position张数，则触发1打4独打模式
+func CallFriendCard(gameID, userID, suit, value string, position int) error {
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return err
@@ -230,48 +237,124 @@ func CallFriendCard(gameID, userID, suit, value string) error {
 		return fmt.Errorf("only host can call friend")
 	}
 
-	if table.Status != "playing" {
-		return fmt.Errorf("game not in playing state")
+	if table.Status != "playing" && table.Status != "calling_friend" {
+		return fmt.Errorf("game not in playing or calling_friend state")
+	}
+
+	if position < 1 || position > 3 {
+		return fmt.Errorf("position must be between 1 and 3")
+	}
+
+	// 叫牌限制：不可以叫本轮场上已经亮过的牌（叫庄、反庄时亮出的牌）
+	// 检查CallRecords中记录的所有叫庄、反庄时亮出的牌
+	for _, record := range table.CallRecords {
+		if record.Rank == value {
+			// 检查花色：如果是同花色的级牌，则不能叫
+			// 注意：record.Suit是主牌花色，不是具体某张牌的花色
+			// 这里需要检查是否叫了已经亮过的级牌
+			return fmt.Errorf("不可以叫本轮场上已经亮过的牌")
+		}
 	}
 
 	table.HostCalledCard = &CalledCard{
-		Suit:  suit,
-		Value: value,
+		Suit:     suit,
+		Value:    value,
+		Position: position,
+		Count:    0, // 初始化计数器
 	}
 
-	// 检查叫的牌是否在庄家手中或底牌中
+	// 统计该牌在庄家手中和底牌中的总数
+	totalCount := 0
 	dealerHand, ok := table.PlayerHands[table.DealerSeat]
 	if !ok {
 		return fmt.Errorf("dealer hand not found")
 	}
 
-	// 检查庄家手牌
+	// 统计庄家手牌中该牌的数量
 	for _, card := range dealerHand.Cards {
 		if card.Suit == suit && card.Value == value {
-			// 叫的牌在庄家手中，触发1打4模式
-			table.IsSoloMode = true
-			table.FriendRevealed = true
-			table.FriendSeat = table.DealerSeat // 庄家自己就是"朋友"
-			table.UpdatedAt = time.Now()
-			return nil
+			totalCount++
 		}
 	}
 
-	// 检查底牌
+	// 统计底牌中该牌的数量
 	for _, card := range table.BottomCards {
 		if card.Suit == suit && card.Value == value {
-			// 叫的牌在底牌中，触发1打4模式
-			table.IsSoloMode = true
-			table.FriendRevealed = true
-			table.FriendSeat = table.DealerSeat // 庄家自己就是"朋友"
-			table.UpdatedAt = time.Now()
-			return nil
+			totalCount++
 		}
 	}
 
-	// 叫的牌不在庄家手中也不在底牌中，正常2打3模式
+	// 如果庄家手中+底牌中的该牌数量 >= position，说明无法打出第position张，触发1打4
+	// 例如：叫第3张红桃A，庄家手中有2张，底牌有1张，总共3张，无法让其他玩家打出第3张
+	if totalCount >= position {
+		table.IsSoloMode = true
+		table.FriendRevealed = true
+		table.FriendSeat = table.DealerSeat // 庄家自己就是"朋友"
+		table.UpdatedAt = time.Now()
+
+		// 记录叫朋友日志（1v4模式）
+		LogGameAction(GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "call_friend",
+			PlayerSeat: table.DealerSeat,
+			PlayerID:   userID,
+			ActionData: map[string]interface{}{
+				"suit":                suit,
+				"value":               value,
+				"position":            position,
+				"called_card":         fmt.Sprintf("%s%s", suit, value),
+				"card_in_dealer_hand": totalCount,
+			},
+			ResultData: map[string]interface{}{
+				"is_solo_mode":    true,
+				"friend_revealed": true,
+				"friend_seat":     table.DealerSeat,
+				"game_mode":       "1v4",
+				"reason":          "called_card_not_reachable",
+			},
+		})
+
+		// 如果之前是calling_friend状态，进入playing状态
+		if table.Status == "calling_friend" {
+			table.Status = "playing"
+			table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+			table.CallPhase = "finished"
+			table.UpdatedAt = time.Now()
+		}
+
+		return nil
+	}
+
+	// 正常2打3模式
 	table.IsSoloMode = false
 	table.UpdatedAt = time.Now()
+
+	// 记录叫朋友日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "call_friend",
+		PlayerSeat: table.DealerSeat,
+		PlayerID:   userID,
+		ActionData: map[string]interface{}{
+			"suit":        suit,
+			"value":       value,
+			"position":    position,
+			"called_card": fmt.Sprintf("%s%s", suit, value),
+		},
+		ResultData: map[string]interface{}{
+			"is_solo_mode":    table.IsSoloMode,
+			"friend_revealed": table.FriendRevealed,
+			"game_mode":       "2v3",
+		},
+	})
+
+	// 如果之前是calling_friend状态，进入playing状态
+	if table.Status == "calling_friend" {
+		table.Status = "playing"
+		table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+		table.CallPhase = "finished"
+		table.UpdatedAt = time.Now()
+	}
 
 	return nil
 }
@@ -314,11 +397,19 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 	card := hand.Cards[cardIndex]
 
 	// Check for friend reveal (when called card is played)
+	// 追踪打出次数，当打出第N张时识别盟友
 	if !table.FriendRevealed && table.HostCalledCard != nil {
 		if card.Suit == table.HostCalledCard.Suit && card.Value == table.HostCalledCard.Value {
-			table.FriendRevealed = true
-			table.FriendSeat = playerSeat
-			hand.IsFriend = true
+			// 打出了叫的牌，计数器+1
+			table.HostCalledCard.Count++
+
+			// 检查是否达到指定的position
+			if table.HostCalledCard.Count == table.HostCalledCard.Position {
+				// 第N张被打出，识别盟友
+				table.FriendRevealed = true
+				table.FriendSeat = playerSeat
+				hand.IsFriend = true
+			}
 		}
 	}
 
@@ -369,8 +460,8 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
 	} else {
-		// Next player
-		result.NextPlayer = playerSeat%5 + 1
+		// Next player (counter-clockwise: 1→5→4→3→2→1)
+		result.NextPlayer = ((playerSeat - 2 + 5) % 5) + 1
 		table.CurrentPlayer = result.NextPlayer
 	}
 
@@ -495,6 +586,23 @@ func CreateGame(name, hostID string) (*GameState, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 记录游戏创建日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     id,
+		ActionType: "game_create",
+		PlayerSeat: 1,
+		PlayerID:   hostID,
+		ActionData: map[string]interface{}{
+			"game_name":   name,
+			"max_players": 5,
+			"host_id":     hostID,
+		},
+		ResultData: map[string]interface{}{
+			"game_id": id,
+			"status":  "waiting",
+		},
+	})
 
 	return GetGame(id)
 }
@@ -635,7 +743,7 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 	}
 
 	// Keep playing while it's an AI player's turn (seats 2-5)
-	maxIterations := 4 // Prevent infinite loop
+	maxIterations := 10 // Prevent infinite loop (increased to handle full round)
 	iterations := 0
 
 	for table.CurrentPlayer != 1 && iterations < maxIterations {
@@ -651,11 +759,11 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 			Hand:       hand.Cards,
 		}
 
-		// Decide which card to play
-		cardIndex := ai.DecidePlay(table)
+		// Decide which cards to play
+		cardIndices := ai.DecidePlay(table)
 
-		// Play the card
-		_, err = PlayCardGame(gameID, hand.UserID, cardIndex)
+		// Play the cards
+		_, err = PlayCardsGame(gameID, hand.UserID, cardIndices)
 		if err != nil {
 			return nil, fmt.Errorf("AI %d play failed: %w", table.CurrentPlayer, err)
 		}
@@ -772,6 +880,23 @@ func JoinGame(gameID, playerID string) error {
 	// Add player to game
 	query := `INSERT INTO game_players (game_id, user_id, seat_number) VALUES ($1, $2, $3)`
 	_, err = db.Exec(query, gameID, playerID, nextSeat)
+
+	if err == nil {
+		// 记录玩家加入日志
+		LogGameAction(GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "player_join",
+			PlayerSeat: nextSeat,
+			PlayerID:   playerID,
+			ActionData: map[string]interface{}{
+				"seat_number":   nextSeat,
+				"current_count": nextSeat,
+			},
+			ResultData: map[string]interface{}{
+				"status": "success",
+			},
+		})
+	}
 
 	return err
 }
@@ -913,8 +1038,9 @@ func DealCards(playerCount int) ([][]Card, []Card) {
 //
 // 独打局升级表（庄家 1 打 4）
 // | 抓分范围 | 结果 | 庄家升级 | 抓分方升级 |
-// | 0 - 59 分 | 独赢 | 升 4 级 | 不升级 |
-// | 60 - 119 分 | 险胜 | 升 2 级 | 不升级 |
+// | 0 分 | 大光 | 升 9 级 | 不升级 |
+// | 1 - 59 分 | 小光 | 升 6 级 | 不升级 |
+// | 60 - 119 分 | 小胜 | 升 3 级 | 不升级 |
 // | 120 - 179 分 | 反超 | 不升级 | 每人升 1 级 |
 // | 180 分及以上 | 惨败 | 不升级 | 每人升 2 级 |
 func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
@@ -922,16 +1048,18 @@ func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
 		// 独打局（庄家 1 打 4）
 		if winnerIsDefender {
 			// 庄家（防守方）获胜
-			if score <= 59 {
-				return 4 // 独赢，升 4 级
+			if score == 0 {
+				return 9 // 大光，升 9 级
+			} else if score <= 59 {
+				return 6 // 小光，升 6 级
 			}
-			return 2 // 险胜，升 2 级
+			return 3 // 小胜（60-119分），升 3 级
 		} else {
 			// 抓分方获胜
 			if score >= 180 {
 				return 2 // 惨败，抓分方每人升 2 级
 			}
-			return 1 // 反超，抓分方每人升 1 级
+			return 1 // 反超（120-179分），抓分方每人升 1 级
 		}
 	} else {
 		// 正常局（庄家找到盟友，2 打 3）
@@ -1001,6 +1129,31 @@ func RecordGameResult(gameID string, results []GameResult) error {
 	if _, err := tx.Exec(`UPDATE games SET status = 'finished' WHERE id = $1`, gameID); err != nil {
 		return err
 	}
+
+	// 记录游戏结束日志
+	levelChanges := make([]map[string]interface{}, 0, len(results))
+	for _, r := range results {
+		levelChanges = append(levelChanges, map[string]interface{}{
+			"user_id":   r.UserID,
+			"old_level": r.OldLevel,
+			"new_level": r.NewLevel,
+			"is_winner": r.IsWinner,
+		})
+	}
+
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "game_end",
+		PlayerSeat: 0,
+		PlayerID:   "",
+		ActionData: map[string]interface{}{
+			"results": results,
+		},
+		ResultData: map[string]interface{}{
+			"level_changes": levelChanges,
+			"game_status":   "finished",
+		},
+	})
 
 	return tx.Commit()
 }
@@ -1122,6 +1275,35 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 
 	table.UpdatedAt = time.Now()
 
+	// 判断牌型用于日志记录
+	playType := "single"
+	if len(cardsToPlay) == 2 && cardsToPlay[0].Value == cardsToPlay[1].Value {
+		playType = "pair"
+	} else if len(cardsToPlay) == 3 && cardsToPlay[0].Value == cardsToPlay[1].Value && cardsToPlay[1].Value == cardsToPlay[2].Value {
+		playType = "triple"
+	} else if len(cardsToPlay) >= 4 && isTractor(cardsToPlay) {
+		playType = "tractor"
+	} else if len(cardsToPlay) > 1 {
+		playType = "throw"
+	}
+
+	// 记录出牌日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "play_cards",
+		PlayerSeat: playerSeat,
+		PlayerID:   userID,
+		ActionData: map[string]interface{}{
+			"card_indices": cardIndices,
+			"cards":        cardsToPlay,
+			"is_lead":      isLead,
+			"play_type":    playType,
+		},
+		ResultData: map[string]interface{}{
+			"success": true,
+		},
+	})
+
 	result := &PlayResult{
 		Success: true,
 		Message: fmt.Sprintf("Played %d cards", len(cardsToPlay)),
@@ -1135,9 +1317,11 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 
 		// Collect scoring cards
 		var collectedCards []Card
+		pointsCollected := 0
 		for _, pc := range table.CurrentTrick {
 			if isScoringCard(pc.Card) {
 				collectedCards = append(collectedCards, pc.Card)
+				pointsCollected += getCardPoints(pc.Card)
 			}
 		}
 
@@ -1153,13 +1337,161 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		}
 		table.TricksWon = append(table.TricksWon, trickCards)
 
+		// 记录回合结束日志
+		LogGameAction(GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "trick_complete",
+			PlayerSeat: winner,
+			PlayerID:   table.PlayerHands[winner].UserID,
+			ActionData: map[string]interface{}{
+				"trick_number": len(table.TricksWon),
+				"trick_cards":  trickCards,
+			},
+			ResultData: map[string]interface{}{
+				"winner_seat":      winner,
+				"points_collected": pointsCollected,
+				"scoring_cards":    collectedCards,
+				"next_leader":      winner,
+			},
+		})
+
 		// Clear trick and set winner as next leader
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
+
+		// Check if game ended (all cards played)
+		allCardsPlayed := true
+		for _, hand := range table.PlayerHands {
+			if len(hand.Cards) > 0 {
+				allCardsPlayed = false
+				break
+			}
+		}
+
+		if allCardsPlayed {
+			// Game ended - calculate final scores and results
+			result.GameEnded = true
+
+			// Calculate total points collected by non-host team
+			totalPoints := 0
+			for seat, hand := range table.PlayerHands {
+				// If not host or friend, count points
+				if seat != table.DealerSeat && (!table.FriendRevealed || seat != table.FriendSeat) {
+					for _, card := range hand.Collected {
+						totalPoints += getCardPoints(card)
+					}
+				}
+			}
+
+			// Add bottom cards to score if non-host team won last trick
+			if winner != table.DealerSeat && (!table.FriendRevealed || winner != table.FriendSeat) {
+				// Non-host team won last trick - bottom cards count double
+				if table.BottomCards != nil {
+					for _, bottomCard := range table.BottomCards {
+						totalPoints += getCardPoints(bottomCard) * 2
+					}
+				}
+			}
+
+			result.FinalScore = totalPoints
+
+			// Determine winner team based on score
+			if totalPoints >= 120 {
+				result.WinnerTeam = "guest" // 抓分方获胜
+			} else {
+				result.WinnerTeam = "host" // 庄家方获胜
+			}
+
+			// Calculate level changes
+			game, err := GetGame(gameID)
+			if err == nil && game != nil {
+				// Determine if solo mode (friend not revealed or no friend)
+				isSolo := !table.FriendRevealed
+				winnerIsHost := result.WinnerTeam == "host"
+				levelUp := CalculateLevelUp(totalPoints, isSolo, winnerIsHost)
+
+				gameResults := make([]GameResult, 0)
+				for _, playerID := range game.PlayerIDs {
+					user, err := GetUserByID(playerID)
+					if err != nil {
+						continue
+					}
+
+					oldLevel := user.Level
+					newLevel := oldLevel
+					isWinner := false
+
+					// Find player seat
+					playerSeat := 0
+					for seat, hand := range table.PlayerHands {
+						if hand.UserID == playerID {
+							playerSeat = seat
+							break
+						}
+					}
+
+					// Determine if winner
+					if result.WinnerTeam == "host" {
+						isWinner = (playerSeat == table.DealerSeat) || (table.FriendRevealed && playerSeat == table.FriendSeat)
+					} else {
+						isWinner = (playerSeat != table.DealerSeat) && (!table.FriendRevealed || playerSeat != table.FriendSeat)
+					}
+
+					// Update level for winners
+					if isWinner && levelUp > 0 {
+						newLevel = upgradeLevel(oldLevel, levelUp)
+					}
+
+					gameResults = append(gameResults, GameResult{
+						UserID:   playerID,
+						OldLevel: oldLevel,
+						NewLevel: newLevel,
+						IsWinner: isWinner,
+						Score:    totalPoints,
+					})
+				}
+
+				result.GameResults = gameResults
+
+				// Record game result and create replay
+				if err := RecordGameResult(gameID, gameResults); err != nil {
+					fmt.Printf("Failed to record game result: %v\n", err)
+				}
+
+				// Create game replay
+				initialState := map[string]interface{}{
+					"dealerSeat": table.DealerSeat,
+					"trumpSuit":  table.TrumpSuit,
+					"trumpRank":  table.TrumpRank,
+				}
+
+				finalState := map[string]interface{}{
+					"totalPoints": totalPoints,
+					"winnerTeam":  result.WinnerTeam,
+					"results":     gameResults,
+				}
+
+				// Get action count
+				actions, _ := GetGameActionLogs(gameID)
+				totalActions := len(actions)
+
+				// Calculate duration
+				durationSeconds := 0
+				if len(actions) > 0 {
+					startTime := actions[0].Timestamp
+					endTime := actions[len(actions)-1].Timestamp
+					durationSeconds = int(endTime.Sub(startTime).Seconds())
+				}
+
+				if err := CreateGameReplay(gameID, initialState, finalState, totalActions, durationSeconds, result.WinnerTeam, totalPoints); err != nil {
+					fmt.Printf("Failed to create game replay: %v\n", err)
+				}
+			}
+		}
 	} else {
-		// Next player
-		result.NextPlayer = playerSeat%5 + 1
+		// Next player (counter-clockwise: 1→5→4→3→2→1)
+		result.NextPlayer = ((playerSeat - 2 + 5) % 5) + 1
 		table.CurrentPlayer = result.NextPlayer
 	}
 
@@ -1229,14 +1561,21 @@ type ThrowCardsResult struct {
 	Reason        string // Reason for failure or success
 }
 
+// CardGroup represents a group of cards by type
+type CardGroup struct {
+	Type  string // "triple", "pair", "single"
+	Cards []Card
+	Value string // Card value (for comparison)
+}
+
 // ValidateThrowCards validates if a throw (甩牌) is valid
-// 规则：甩牌时，如果其中最小的牌比所有其他玩家该花色的牌都大或相等，甩牌成功
-// 否则只出最小的那张牌，其他牌收回手里
+// 规则：先看牌型，再看点数。按逆时针顺序询问每个玩家是否能管上。
 func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCardsResult {
 	if len(cards) < 2 {
 		return &ThrowCardsResult{
 			IsValid:    true,
 			ActualPlay: cards,
+			Reason:     "单张不算甩牌",
 		}
 	}
 
@@ -1252,29 +1591,68 @@ func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCa
 		}
 	}
 
-	// 找出最小的牌
-	minCard := findMinCard(cards)
-	minValue := getCardNumericValue(minCard.Value)
+	// 按牌型分组：三张、对子、单张
+	groups := groupCardsByType(cards)
 
-	// 检查所有其他玩家手中的该花色牌
-	for seat, hand := range table.PlayerHands {
-		if seat == playerSeat {
+	// 按逆时针顺序询问每个玩家
+	// 逆时针顺序：playerSeat -> (playerSeat-1+5)%5+1 -> ...
+	for i := 1; i <= 4; i++ {
+		seat := ((playerSeat-1-i+5)%5 + 1)
+		hand, ok := table.PlayerHands[seat]
+		if !ok {
 			continue
 		}
 
-		// 检查该玩家是否有更大的该花色牌
-		for _, card := range hand.Cards {
-			if card.Suit == firstSuit {
-				cardValue := getCardNumericValue(card.Value)
-				if cardValue > minValue {
-					// 有玩家有更大的牌，甩牌失败
-					return &ThrowCardsResult{
-						IsValid:       false,
-						ActualPlay:    []Card{minCard},
-						ReturnedCards: removeCardFromSlice(cards, minCard),
-						Reason:        fmt.Sprintf("玩家%d有更大的%s牌", seat, getSuitDisplayName(firstSuit)),
+		// 检查该玩家是否能管上任意一种牌型
+		canBeat := make(map[string]bool) // 记录哪些牌型可以被管上
+
+		for _, group := range groups {
+			switch group.Type {
+			case "triple":
+				// 检查是否有更大的三张
+				if hasLargerTriple(hand.Cards, firstSuit, group.Value) {
+					canBeat["triple"] = true
+				}
+			case "pair":
+				// 检查是否有更大的对子
+				if hasLargerPair(hand.Cards, firstSuit, group.Value) {
+					canBeat["pair"] = true
+				}
+			case "single":
+				// 检查是否有更大的单张
+				if hasLargerSingle(hand.Cards, firstSuit, group.Value) {
+					canBeat["single"] = true
+				}
+			}
+		}
+
+		// 如果能管上任意一种牌型，甩牌失败
+		if len(canBeat) > 0 {
+			// 选择要留下的最小牌型
+			// 优先级：三张 > 对子 > 单张
+			var keepGroup *CardGroup
+			for _, group := range groups {
+				if !canBeat[group.Type] {
+					if keepGroup == nil || getTypePriority(group.Type) > getTypePriority(keepGroup.Type) {
+						keepGroup = &group
 					}
 				}
+			}
+
+			// 如果所有牌型都能被管上，选择三张、对子、单张中的最小
+			if keepGroup == nil {
+				for _, group := range groups {
+					if keepGroup == nil || getTypePriority(group.Type) > getTypePriority(keepGroup.Type) {
+						keepGroup = &group
+					}
+				}
+			}
+
+			// 返回结果
+			return &ThrowCardsResult{
+				IsValid:    false,
+				ActualPlay: keepGroup.Cards,
+				Reason:     fmt.Sprintf("玩家%d能管上，只能出%s", seat, describeGroup(*keepGroup)),
 			}
 		}
 	}
@@ -1284,6 +1662,130 @@ func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCa
 		IsValid:    true,
 		ActualPlay: cards,
 		Reason:     "甩牌成功",
+	}
+}
+
+// groupCardsByType groups cards by type (triple, pair, single)
+func groupCardsByType(cards []Card) []CardGroup {
+	// 统计每个点数的牌
+	valueCounts := make(map[string][]Card)
+	for _, card := range cards {
+		valueCounts[card.Value] = append(valueCounts[card.Value], card)
+	}
+
+	var groups []CardGroup
+
+	// 先处理三张
+	for value, cards := range valueCounts {
+		if len(cards) >= 3 {
+			groups = append(groups, CardGroup{
+				Type:  "triple",
+				Cards: cards[:3],
+				Value: value,
+			})
+			valueCounts[value] = cards[3:] // 移除已处理的牌
+		}
+	}
+
+	// 再处理对子
+	for value, cards := range valueCounts {
+		if len(cards) >= 2 {
+			groups = append(groups, CardGroup{
+				Type:  "pair",
+				Cards: cards[:2],
+				Value: value,
+			})
+			valueCounts[value] = cards[2:] // 移除已处理的牌
+		}
+	}
+
+	// 最后处理单张
+	for value, cards := range valueCounts {
+		for _, card := range cards {
+			groups = append(groups, CardGroup{
+				Type:  "single",
+				Cards: []Card{card},
+				Value: value,
+			})
+		}
+	}
+
+	return groups
+}
+
+// hasLargerTriple checks if hand has larger triple of the same suit
+func hasLargerTriple(handCards []Card, suit, value string) bool {
+	valueCounts := make(map[string]int)
+	for _, card := range handCards {
+		if card.Suit == suit {
+			valueCounts[card.Value]++
+		}
+	}
+
+	targetValue := getCardNumericValue(value)
+	for v, count := range valueCounts {
+		if count >= 3 && getCardNumericValue(v) > targetValue {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLargerPair checks if hand has larger pair of the same suit
+func hasLargerPair(handCards []Card, suit, value string) bool {
+	valueCounts := make(map[string]int)
+	for _, card := range handCards {
+		if card.Suit == suit {
+			valueCounts[card.Value]++
+		}
+	}
+
+	targetValue := getCardNumericValue(value)
+	for v, count := range valueCounts {
+		if count >= 2 && getCardNumericValue(v) > targetValue {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLargerSingle checks if hand has larger single of the same suit
+func hasLargerSingle(handCards []Card, suit, value string) bool {
+	targetValue := getCardNumericValue(value)
+	for _, card := range handCards {
+		if card.Suit == suit && getCardNumericValue(card.Value) > targetValue {
+			return true
+		}
+	}
+	return false
+}
+
+// getTypePriority returns priority of card type (higher is better)
+func getTypePriority(cardType string) int {
+	switch cardType {
+	case "triple":
+		return 3
+	case "pair":
+		return 2
+	case "single":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// describeGroup describes a card group
+func describeGroup(group CardGroup) string {
+	suit := getSuitDisplayName(group.Cards[0].Suit)
+	switch group.Type {
+	case "triple":
+		return fmt.Sprintf("三张%s%s", suit, group.Value)
+	case "pair":
+		return fmt.Sprintf("对%s%s", suit, group.Value)
+	case "single":
+		return fmt.Sprintf("单张%s%s", suit, group.Value)
+	default:
+		return "未知牌型"
 	}
 }
 
@@ -1693,46 +2195,87 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	// 检查反庄（如果之前已经有人叫庄）
 	if len(table.CallRecords) > 1 {
 		lastCall := table.CallRecords[len(table.CallRecords)-2]
-		// 反庄规则：
-		// 1. 同花色反：使用相同花色、相同点数的级牌，张数必须更多
-		// 2. 升级反：使用比当前级牌高1级或以上的级牌 → 自己成为新庄家
-		if suit == lastCall.Suit && rank == lastCall.Rank {
-			// 同花色反，张数必须更多
-			if len(cardsToPlay) <= lastCall.Count {
-				return nil, fmt.Errorf("反庄张数必须多于当前叫庄")
-			}
-			if len(cardsToPlay) > 3 {
-				return nil, fmt.Errorf("反主最多3张")
-			}
-		} else {
-			// 升级反：使用更高级的牌反庄，自己成为新庄家
-			currentRankValue := getCardNumericValue(lastCall.Rank)
-			newRankValue := getCardNumericValue(rank)
-			if newRankValue <= currentRankValue {
-				return nil, fmt.Errorf("升级反必须用更高级的牌")
-			}
-			// 升级反成功，更新庄家和级牌
+
+		// 反庄基础规则：必须比临时庄家亮的牌多至少一张
+		if len(cardsToPlay) <= lastCall.Count {
+			return nil, fmt.Errorf("反庄张数必须多于当前叫庄")
+		}
+		if len(cardsToPlay) > 3 {
+			return nil, fmt.Errorf("反主最多3张")
+		}
+
+		// 获取反庄玩家的等级
+		playerUser, err := GetUserByID(userID)
+		if err != nil {
+			return nil, fmt.Errorf("无法获取玩家信息")
+		}
+		playerLevel := playerUser.Level
+
+		// 判断反庄方式
+		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank）
+		// 方式二：用玩家自己的级牌反庄（rank == playerLevel）
+
+		if rank == lastCall.Rank {
+			// 方式一：用临时庄家的级牌反庄
+			// 庄家不变，只变主牌花色
+			table.TrumpSuit = suit
+			// 庄家保持为lastCall.Seat
+			table.DealerSeat = lastCall.Seat
+			table.HostID = table.PlayerHands[lastCall.Seat].UserID
+		} else if rank == playerLevel {
+			// 方式二：用玩家自己的级牌反庄
+			// 玩家变为临时庄家，主牌花色变为玩家亮的花色
 			table.TrumpRank = rank
 			table.DealerSeat = playerSeat
 			table.TrumpSuit = suit
-			table.HostID = table.PlayerHands[playerSeat].UserID
-			table.CallPhase = "finished"
-			table.UpdatedAt = time.Now()
-
-			// 如果是单人模式，直接进入找朋友阶段
-			if isSinglePlayerGame(table) {
-				return finalizeDealerAndStartPlaying(table)
-			}
-
-			return table, nil
+			table.HostID = userID
+		} else {
+			return nil, fmt.Errorf("反庄必须使用临时庄家的级牌或自己的级牌")
 		}
 	}
 
-	// 设置庄家和主牌花色
-	table.DealerSeat = playerSeat
-	table.TrumpSuit = suit
-	table.HostID = table.PlayerHands[playerSeat].UserID
+	// 首次叫庄或反庄成功后，验证rank是否为玩家的等级
+	if len(table.CallRecords) == 1 {
+		// 首次叫庄，必须使用玩家自己的级牌
+		playerUser, err := GetUserByID(userID)
+		if err != nil {
+			return nil, fmt.Errorf("无法获取玩家信息")
+		}
+		if rank != playerUser.Level {
+			return nil, fmt.Errorf("首次叫庄必须使用自己的级牌")
+		}
+	}
+
+	// 设置庄家和主牌花色（首次叫庄）
+	if len(table.CallRecords) == 1 {
+		table.DealerSeat = playerSeat
+		table.TrumpSuit = suit
+		table.HostID = userID
+		table.TrumpRank = rank
+	}
+
 	table.CallPhase = "finished"
+
+	// 记录抢庄日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "call_dealer",
+		PlayerSeat: playerSeat,
+		PlayerID:   userID,
+		ActionData: map[string]interface{}{
+			"suit":         suit,
+			"rank":         rank,
+			"count":        len(cardsToPlay),
+			"card_indices": cardIndices,
+			"cards":        cardsToPlay,
+		},
+		ResultData: map[string]interface{}{
+			"dealer_seat": table.DealerSeat,
+			"trump_suit":  table.TrumpSuit,
+			"trump_rank":  table.TrumpRank,
+			"call_phase":  table.CallPhase,
+		},
+	})
 
 	// 如果是单人模式，直接进入找朋友阶段
 	if isSinglePlayerGame(table) {
@@ -1778,6 +2321,23 @@ func FlipBottomCard(gameID string) (*GameTable, error) {
 	nextCard := table.BottomCards[len(table.FlippedBottomCards)]
 	table.FlippedBottomCards = append(table.FlippedBottomCards, nextCard)
 
+	// 记录翻底牌日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "flip_bottom",
+		PlayerSeat: 0,
+		PlayerID:   "",
+		ActionData: map[string]interface{}{
+			"card":          nextCard,
+			"flipped_count": len(table.FlippedBottomCards),
+			"total_bottom":  len(table.BottomCards),
+		},
+		ResultData: map[string]interface{}{
+			"card_suit":  nextCard.Suit,
+			"card_value": nextCard.Value,
+		},
+	})
+
 	// 检查是否翻到了级牌
 	rank := table.TrumpRank
 	if nextCard.Value == rank {
@@ -1807,7 +2367,27 @@ func FlipBottomCard(gameID string) (*GameTable, error) {
 	// 如果翻完了所有底牌还没定庄，则首发人当庄
 	if len(table.FlippedBottomCards) >= len(table.BottomCards) {
 		table.DealerSeat = table.StartingDealerSeat
-		table.TrumpSuit = table.BottomCards[len(table.BottomCards)-1].Suit
+
+		// 从第7张底牌开始往前找，找第一张有花色的牌（非王）
+		trumpSuit := ""
+		for i := len(table.BottomCards) - 1; i >= 0; i-- {
+			if table.BottomCards[i].Suit != "joker" && table.BottomCards[i].Suit != "" {
+				// 找到了第一张有花色的牌
+				trumpSuit = table.BottomCards[i].Suit
+				break
+			}
+		}
+
+		// 如果所有底牌都是王（极端情况），默认使用第一张底牌的花色或hearts
+		if trumpSuit == "" {
+			if len(table.BottomCards) > 0 && table.BottomCards[0].Suit != "joker" {
+				trumpSuit = table.BottomCards[0].Suit
+			} else {
+				trumpSuit = "hearts" // 默认值
+			}
+		}
+
+		table.TrumpSuit = trumpSuit
 		table.HostID = table.PlayerHands[table.StartingDealerSeat].UserID
 		table.CallPhase = "finished"
 
@@ -1913,10 +2493,34 @@ func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameT
 	// 将扣的牌放回底牌
 	table.BottomCards = discardedCards
 
-	// 进入游戏阶段
-	table.Status = "playing"
-	table.CurrentPlayer = table.DealerSeat // 庄家先出牌
-	table.CallPhase = "finished"
+	// 记录扣牌日志
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "discard_bottom",
+		PlayerSeat: table.DealerSeat,
+		PlayerID:   userID,
+		ActionData: map[string]interface{}{
+			"card_indices":    cardIndices,
+			"discarded_cards": discardedCards,
+		},
+		ResultData: map[string]interface{}{
+			"status":      "success",
+			"dealer_seat": table.DealerSeat,
+		},
+	})
+
+	// 检查是否已经叫了朋友
+	if table.HostCalledCard == nil {
+		// 进入找朋友阶段
+		table.Status = "calling_friend"
+		table.CallPhase = "calling_friend"
+	} else {
+		// 已经叫了朋友，直接进入出牌阶段
+		table.Status = "playing"
+		table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+		table.CallPhase = "finished"
+	}
+
 	table.UpdatedAt = time.Now()
 
 	return table, nil
@@ -2105,4 +2709,33 @@ func AutoCallForDealer(gameID string) (*GameTable, error) {
 	}
 
 	return nil, fmt.Errorf("human player not found")
+}
+
+// upgradeLevel upgrades a player's level by the specified number of levels
+func upgradeLevel(currentLevel string, levelsUp int) string {
+	if levelsUp <= 0 {
+		return currentLevel
+	}
+
+	// Level progression: 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> J -> Q -> K -> A -> (win)
+	levels := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
+
+	currentIndex := -1
+	for i, level := range levels {
+		if level == currentLevel {
+			currentIndex = i
+			break
+		}
+	}
+
+	if currentIndex == -1 {
+		return currentLevel
+	}
+
+	newIndex := currentIndex + levelsUp
+	if newIndex >= len(levels) {
+		return "A" // Max level
+	}
+
+	return levels[newIndex]
 }

@@ -261,6 +261,29 @@ func PlayCard(c *gin.Context) {
 		return
 	}
 
+	// Log the play action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "play_cards",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: map[string]interface{}{
+				"cardIndices": cardIndices,
+			},
+			ResultData: result,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"result":  result,
@@ -297,16 +320,48 @@ func CallFriendHandler(c *gin.Context) {
 
 	suit := data["suit"]
 	value := data["value"]
+	positionStr := data["position"]
 
-	if suit == "" || value == "" {
-		middleware.SendError(c, http.StatusBadRequest, "suit and value are required")
+	if suit == "" || value == "" || positionStr == "" {
+		middleware.SendError(c, http.StatusBadRequest, "suit, value and position are required")
 		return
 	}
 
-	err := models.CallFriendCard(gameID, user.ID, suit, value)
+	// Parse position (第几张：1, 2, or 3)
+	position := 1 // default
+	if positionStr != "" {
+		fmt.Sscanf(positionStr, "%d", &position)
+	}
+
+	err := models.CallFriendCard(gameID, user.ID, suit, value, position)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Log the call friend action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "call_friend",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: map[string]interface{}{
+				"suit":     suit,
+				"value":    value,
+				"position": position,
+			},
+			ResultData: nil,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -352,6 +407,30 @@ func CallDealerHandler(c *gin.Context) {
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Log the call dealer action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "call_dealer",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: map[string]interface{}{
+				"suit":        suit,
+				"cardIndices": cardIndices,
+			},
+			ResultData: table,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -409,6 +488,29 @@ func DiscardBottomCardsHandler(c *gin.Context) {
 		return
 	}
 
+	// Log the discard action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "discard_bottom",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: map[string]interface{}{
+				"cardIndices": cardIndices,
+			},
+			ResultData: table,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
@@ -459,16 +561,6 @@ func StartSinglePlayerGame(c *gin.Context) {
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
-	}
-
-	// AI calls friend card automatically
-	if table.HostCalledCard == nil {
-		table, _ = models.GetTableGame(gameID)
-		if hand, ok := table.PlayerHands[1]; ok {
-			suit, value := models.AICallFriendCard(hand.Cards)
-			models.CallFriendCard(gameID, user.ID, suit, value)
-			table, _ = models.GetTableGame(gameID)
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -788,13 +880,6 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 			middleware.SendError(c, http.StatusBadRequest, err.Error())
 			return
 		}
-
-		// AI calls friend card
-		if table.HostCalledCard == nil {
-			suit, value := models.AICallFriendCard(table.PlayerHands[1].Cards)
-			models.CallFriendCard(gameID, user.ID, suit, value)
-			table, _ = models.GetTableGame(gameID)
-		}
 	}
 
 	// Get table state
@@ -885,5 +970,66 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 		"myHandJSON":   template.HTML(myHandJSON),
 		"user":         user,
 		"loggedIn":     true,
+	})
+}
+
+// ReplayPageHandler handles game replay page
+func ReplayPageHandler(c *gin.Context) {
+	// Check if user is logged in
+	user, ok := middleware.GetCurrentUser(c)
+	if !ok {
+		// Try from cookie
+		cookie, err := c.Cookie("token")
+		if err == nil && cookie != "" {
+			user, ok = tryGetUserFromToken(cookie)
+		}
+	}
+
+	// Redirect to login if not authenticated
+	if !ok {
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	gameID := c.Param("id")
+
+	middleware.SendHTML(c, "replay.html", gin.H{
+		"title":    "游戏回放 - 找朋友升级",
+		"gameID":   gameID,
+		"user":     user,
+		"loggedIn": true,
+	})
+}
+
+// GetGameReplayHandler retrieves the replay data for a specific game
+func GetGameReplayHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	replay, err := models.GetGameReplay(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusNotFound, "Replay not found for this game")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"replay":  replay,
+	})
+}
+
+// GetGameActionsHandler retrieves all action logs for a specific game
+func GetGameActionsHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	actions, err := models.GetGameActionLogs(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, "Failed to retrieve game actions")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"actions": actions,
+		"count":   len(actions),
 	})
 }

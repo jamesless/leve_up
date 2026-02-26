@@ -925,6 +925,14 @@ function renderMyHand(preserveOrder = false) {
                 const cardEl = createPokerCard(item.card, item.originalIndex);
                 cardEl.classList.add('dealing');
                 cardEl.style.animationDelay = `${idx * 0.03}s`;
+
+                // Remove dealing class after animation completes
+                cardEl.addEventListener('animationend', (e) => {
+                    if (e.animationName.includes('deal')) {
+                        cardEl.classList.remove('dealing');
+                    }
+                }, { once: true });
+
                 container.appendChild(cardEl);
             });
         }

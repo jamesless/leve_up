@@ -38,6 +38,7 @@ func main() {
 	r.GET("/game", handlers.GamePageHandler)
 	r.GET("/game/table/:id", handlers.GameTablePageHandler)
 	r.GET("/game/singleplayer/:id", handlers.SinglePlayerGamePageHandler)
+	r.GET("/game/replay/:id", handlers.ReplayPageHandler)
 
 	// API routes
 	api := r.Group("/api")
@@ -65,6 +66,9 @@ func main() {
 			protected.POST("/game/:id/discard-bottom", handlers.DiscardBottomCardsHandler)
 			protected.POST("/game/:id/play", handlers.PlayCard)
 			protected.POST("/game/:id/ai-play", handlers.AIPlayHandler)
+			// Replay APIs
+			protected.GET("/game/:id/replay", handlers.GetGameReplayHandler)
+			protected.GET("/game/:id/actions", handlers.GetGameActionsHandler)
 		}
 	}
 
