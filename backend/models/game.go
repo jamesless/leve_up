@@ -436,7 +436,7 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 
 	// Check if trick is complete (5 cards played)
 	if len(table.CurrentTrick) == 5 {
-		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit)
+		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
 
@@ -470,24 +470,177 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 }
 
 // determineTrickWinner determines who wins the current trick
-func determineTrickWinner(trick []PlayedCard, trumpSuit string) int {
-	winner := trick[0].Seat
-	leadSuit := trick[0].Card.Suit
-	highestValue := getCardValue(trick[0].Card, leadSuit, trumpSuit)
+// 新规则：必须同牌型才能毙牌（对子毙对子，三张毙三张等）
+// 王作为主牌的一部分，不存在"王毙主牌"
+func determineTrickWinner(trick []PlayedCard, trumpSuit, trumpRank string) int {
+	if len(trick) == 0 {
+		return 0
+	}
 
-	for i := 1; i < len(trick); i++ {
-		pc := trick[i]
-		value := getCardValue(pc.Card, leadSuit, trumpSuit)
-		if value > highestValue {
-			highestValue = value
-			winner = pc.Seat
+	// 按座位分组牌
+	playsByPlayer := make(map[int][]Card)
+	playerOrder := []int{} // 记录出牌顺序
+	for _, pc := range trick {
+		if _, exists := playsByPlayer[pc.Seat]; !exists {
+			playerOrder = append(playerOrder, pc.Seat)
+		}
+		playsByPlayer[pc.Seat] = append(playsByPlayer[pc.Seat], pc.Card)
+	}
+
+	// 领出玩家和领出牌
+	leadPlayer := playerOrder[0]
+	leadCards := playsByPlayer[leadPlayer]
+	leadSuit := leadCards[0].Suit
+
+	// 判断领出牌型
+	leadCardType := determineCardType(leadCards)
+
+	// 初始化赢家为领出玩家
+	winner := leadPlayer
+	winnerCards := leadCards
+
+	// 遍历其他玩家的出牌
+	for i := 1; i < len(playerOrder); i++ {
+		player := playerOrder[i]
+		cards := playsByPlayer[player]
+
+		// 判断跟牌的牌型
+		cardType := determineCardType(cards)
+
+		// 只有牌型匹配才能参与比较
+		if cardType != leadCardType {
+			continue // 牌型不匹配，无法毙牌
+		}
+
+		// 牌型匹配，比较大小
+		// 规则：主牌（含王）> 副牌
+		if canBeatCards(cards, winnerCards, leadSuit, trumpSuit, trumpRank) {
+			winner = player
+			winnerCards = cards
 		}
 	}
 
 	return winner
 }
 
+// determineCardType 判断牌型
+func determineCardType(cards []Card) string {
+	if len(cards) == 1 {
+		return "single"
+	}
+	if len(cards) == 2 && cards[0].Value == cards[1].Value && cards[0].Suit == cards[1].Suit {
+		return "pair"
+	}
+	if len(cards) == 3 && cards[0].Value == cards[1].Value && cards[1].Value == cards[2].Value &&
+		cards[0].Suit == cards[1].Suit && cards[1].Suit == cards[2].Suit {
+		return "triple"
+	}
+	if len(cards) >= 4 && isTractor(cards) {
+		return "tractor"
+	}
+	// 甩牌或其他组合
+	return "throw"
+}
+
+// canBeatCards 判断 cards 是否能击败 currentWinnerCards
+// 规则：主牌（含王）> 副牌
+func canBeatCards(cards []Card, currentWinnerCards []Card, leadSuit, trumpSuit, trumpRank string) bool {
+	// 判断两组牌的花色类型
+	cardsType := getPlayType(cards, trumpSuit)
+	winnerType := getPlayType(currentWinnerCards, trumpSuit)
+
+	// 主牌 > 副牌
+	if cardsType == "trump" && winnerType != "trump" {
+		return true // 主牌毙副牌
+	}
+	if cardsType != "trump" && winnerType == "trump" {
+		return false // 副牌无法毙主牌
+	}
+
+	// 同为主牌或同为副牌，比较最大牌的等级
+	maxCard1 := getMaxCardRank(cards, trumpSuit, trumpRank)
+	maxCard2 := getMaxCardRank(currentWinnerCards, trumpSuit, trumpRank)
+
+	return maxCard1 > maxCard2
+}
+
+// getPlayType 判断出牌类型：trump（主牌）或 suit（副牌）
+func getPlayType(cards []Card, trumpSuit string) string {
+	for _, card := range cards {
+		// 王是主牌的一部分
+		if card.Type == "joker" {
+			return "trump"
+		}
+		// 主花色牌是主牌
+		if card.Suit == trumpSuit {
+			return "trump"
+		}
+	}
+	return "suit" // 副牌
+}
+
+// getMaxCardRank 获取一组牌中最大牌的等级
+func getMaxCardRank(cards []Card, trumpSuit, trumpRank string) int {
+	maxRank := 0
+	for _, card := range cards {
+		rank := getCardRank(card, trumpSuit, trumpRank)
+		if rank > maxRank {
+			maxRank = rank
+		}
+	}
+	return maxRank
+}
+
 // getCardValue returns the numeric value of a card for comparison
+// getCardRank 计算牌在游戏中的等级，考虑主牌、级牌等特殊规则
+// 返回值越大，牌的等级越高
+// 主牌等级: 大王(1000) > 小王(900) > 主级牌(800) > 副级牌(700-703) > 主A(614) > 主K(613) > ... > 主3(603)
+// 副牌等级: A(14) > K(13) > ... > 3(3) > 2(2) (跳过级牌)
+func getCardRank(card Card, trumpSuit, trumpRank string) int {
+	// 1. 大王
+	if card.Type == "joker" && card.Value == "big" {
+		return 1000
+	}
+
+	// 2. 小王
+	if card.Type == "joker" && card.Value == "small" {
+		return 900
+	}
+
+	// 3. 主级牌（主花色的级牌）
+	if card.Value == trumpRank && card.Suit == trumpSuit {
+		return 800
+	}
+
+	// 4. 副级牌（其他花色的级牌）
+	// 按花色顺序：spades > hearts > diamonds > clubs
+	if card.Value == trumpRank {
+		suitOrder := map[string]int{
+			"spades":   3,
+			"hearts":   2,
+			"diamonds": 1,
+			"clubs":    0,
+		}
+		return 700 + suitOrder[card.Suit]
+	}
+
+	// 5. 主花色牌（非级牌）
+	if card.Suit == trumpSuit {
+		baseValues := map[string]int{
+			"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+			"J": 11, "Q": 12, "K": 13, "A": 14,
+		}
+		return 600 + baseValues[card.Value]
+	}
+
+	// 6. 副牌（非级牌）
+	baseValues := map[string]int{
+		"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+		"J": 11, "Q": 12, "K": 13, "A": 14,
+	}
+	return baseValues[card.Value]
+}
+
 func getCardValue(card Card, leadSuit, trumpSuit string) int {
 	values := map[string]int{
 		"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -1311,7 +1464,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 
 	// Check if trick is complete (5 cards played - considering pairs/triples count as one play)
 	if len(table.CurrentTrick) >= 5 {
-		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit)
+		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
 
@@ -1510,7 +1663,7 @@ func validateCardPlay(cards []Card, table *GameTable) error {
 
 	if isLead {
 		// Leading: can play single card, pair, triple, or tractor
-		return validateLeadPlay(cards)
+		return validateLeadPlay(cards, table)
 	} else {
 		// Following: must follow the lead card type
 		return validateFollowPlay(cards, table)
@@ -1518,7 +1671,7 @@ func validateCardPlay(cards []Card, table *GameTable) error {
 }
 
 // validateLeadPlay validates a lead play
-func validateLeadPlay(cards []Card) error {
+func validateLeadPlay(cards []Card, table *GameTable) error {
 	if len(cards) == 1 {
 		// Single card is always valid
 		return nil
@@ -1526,7 +1679,7 @@ func validateLeadPlay(cards []Card) error {
 
 	// Check for tractor (consecutive pairs or triples of same suit)
 	if len(cards) >= 4 {
-		if err := validateTractor(cards); err == nil {
+		if err := validateTractor(cards, table); err == nil {
 			return nil // Valid tractor
 		}
 		// If not a valid tractor, continue to check pair/triple
@@ -1833,7 +1986,8 @@ func getSuitDisplayName(suit string) string {
 
 // validateTractor validates if cards form a tractor (consecutive pairs or triples of same suit)
 // 规则：连对（2对以上）或连三（2组以上三张）
-func validateTractor(cards []Card) error {
+// 注意：需要考虑级牌跳过的情况，如打5级时，副牌4-6是连续的（跳过5）
+func validateTractor(cards []Card, table *GameTable) error {
 	// Tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)
 	if len(cards) < 4 {
 		return fmt.Errorf("tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)")
@@ -1881,23 +2035,69 @@ func validateTractor(cards []Card) error {
 		return fmt.Errorf("tractor must have at least 2 groups")
 	}
 
-	// Check if values are consecutive
-	values := make([]string, 0, len(valueCounts))
+	// Check if values are consecutive using the card rank system
+	// This correctly handles trump rank skipping
+	// Example: if trump rank is 5, then 4-6 in non-trump suit is consecutive
+
+	// Create a list of unique cards (one per value)
+	uniqueCards := make([]Card, 0, len(valueCounts))
 	for value := range valueCounts {
-		values = append(values, value)
+		// Find a card with this value
+		for _, card := range cards {
+			if card.Value == value {
+				uniqueCards = append(uniqueCards, card)
+				break
+			}
+		}
 	}
 
-	// Sort values by their numeric order
-	sort.Slice(values, func(i, j int) bool {
-		return getCardNumericValue(values[i]) < getCardNumericValue(values[j])
+	// Sort cards by their rank in the game
+	sort.Slice(uniqueCards, func(i, j int) bool {
+		rankI := getCardRank(uniqueCards[i], table.TrumpSuit, table.TrumpRank)
+		rankJ := getCardRank(uniqueCards[j], table.TrumpSuit, table.TrumpRank)
+		return rankI < rankJ
 	})
 
-	// Check if values are consecutive
-	for i := 1; i < len(values); i++ {
-		prevValue := getCardNumericValue(values[i-1])
-		currValue := getCardNumericValue(values[i])
-		if currValue != prevValue+1 {
-			return fmt.Errorf("tractor values must be consecutive (e.g., 10-J-Q)")
+	// Check if ranks are consecutive
+	// For a valid tractor, each card should have rank = previous rank + 1
+	// But we need to handle the case where trump rank is skipped
+
+	// Build expected consecutive sequence
+	trumpSuit := table.TrumpSuit
+	trumpRank := table.TrumpRank
+
+	for i := 1; i < len(uniqueCards); i++ {
+		prevRank := getCardRank(uniqueCards[i-1], trumpSuit, trumpRank)
+		currRank := getCardRank(uniqueCards[i], trumpSuit, trumpRank)
+
+		// Check if cards are consecutive
+		// For trump cards (rank >= 600), they should be consecutive in the 600+ range
+		// For non-trump cards (rank < 600), they should be consecutive in the base value range
+
+		if currRank >= 600 && prevRank >= 600 {
+			// Both are trump cards (same suit as trump)
+			if currRank != prevRank+1 {
+				return fmt.Errorf("tractor values must be consecutive")
+			}
+		} else if currRank < 600 && prevRank < 600 {
+			// Both are non-trump cards
+			// Check if they are consecutive in base value, considering trump rank skip
+			prevBase := getCardNumericValue(uniqueCards[i-1].Value)
+			currBase := getCardNumericValue(uniqueCards[i].Value)
+			trumpRankBase := getCardNumericValue(trumpRank)
+
+			// If trump rank is between prev and curr, they should differ by 2
+			// Otherwise they should differ by 1
+			if prevBase < trumpRankBase && currBase > trumpRankBase {
+				if currBase != prevBase+2 {
+					return fmt.Errorf("tractor values must be consecutive (considering trump rank skip)")
+				}
+			} else if currBase != prevBase+1 {
+				return fmt.Errorf("tractor values must be consecutive")
+			}
+		} else {
+			// One is trump, one is not - this shouldn't happen as we checked same suit
+			return fmt.Errorf("mixed trump and non-trump cards in tractor")
 		}
 	}
 
@@ -1992,11 +2192,16 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 	}
 
 	// 4. 无色时：主牌杀（牌型必须完美匹配）
+	// 新规则：王是主牌的一部分
 	trumpSuit := table.TrumpSuit
 	if trumpSuit != "" {
-		// 检查是否使用主牌
+		// 检查是否使用主牌（包括王）
 		allTrump := true
 		for _, card := range cards {
+			// 王是主牌的一部分
+			if card.Type == "joker" {
+				continue // 王是主牌
+			}
 			if card.Suit != trumpSuit {
 				allTrump = false
 				break
