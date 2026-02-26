@@ -122,3 +122,27 @@ export function useGameActions(gameId: string) {
     enabled: Boolean(gameId),
   });
 }
+
+export function useCallDealer(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { suit: string; cardIndices: number[] }) =>
+      gameService.callDealer(gameId, params.suit, params.cardIndices),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
+  });
+}
+
+export function useDiscardBottomCards(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (cardIndices: number[]) =>
+      gameService.discardBottomCards(gameId, cardIndices),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
+  });
+}

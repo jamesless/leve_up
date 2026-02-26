@@ -4,17 +4,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
 import PlayerSeat from '@/components/game/PlayerSeat';
+import CallDealerDialog from '@/components/game/CallDealerDialog';
+import DiscardDialog from '@/components/game/DiscardDialog';
 import {
   useGameTable,
   usePlayCards,
   useAiPlay,
   useStartGame,
   useStartSinglePlayerGame,
+  useCallDealer,
+  useDiscardBottomCards,
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
-import { EGameStatus } from '@/types';
-import { useEffect, useRef } from 'react';
+import { EGameStatus, ECardSuit } from '@/types';
+import { useEffect, useRef, useState } from 'react';
 
 const SEAT_POSITIONS = ['top', 'left', 'right', 'bottom-left', 'bottom-right'] as const;
 
@@ -30,10 +34,14 @@ export default function GameTable() {
   const { data, isLoading, isError } = useGameTable(gameId);
   const playCards = usePlayCards(gameId);
   const aiPlay = useAiPlay(gameId);
+  const callDealerMutation = useCallDealer(gameId);
+  const discardMutation = useDiscardBottomCards(gameId);
   const startGameMutation = useStartGame();
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
   const hasTriggeredAutoStartRef = useRef(false);
   const game = data?.game;
+  const [showCallDialog, setShowCallDialog] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
   useEffect(() => {
     if (!isSinglePlayerRoute || hasTriggeredAutoStartRef.current) return;
@@ -75,6 +83,39 @@ export default function GameTable() {
     );
   };
 
+  const handleCallDealer = (suit: ECardSuit, cardIndices: number[]) => {
+    callDealerMutation.mutate(
+      { suit, cardIndices },
+      { onSuccess: () => {
+        clearSelection();
+        setShowCallDialog(false);
+      }},
+    );
+  };
+
+  const handleDiscard = (cardIndices: number[]) => {
+    discardMutation.mutate(
+      cardIndices,
+      { onSuccess: () => {
+        clearSelection();
+        setShowDiscardDialog(false);
+      }},
+    );
+  };
+
+  // 自动显示叫庄或扣牌对话框
+  useEffect(() => {
+    if (!game) return;
+    if (game.status === EGameStatus.CALLING && !showCallDialog) {
+      setShowCallDialog(true);
+    } else if (game.status === EGameStatus.DISCARDING && !showDiscardDialog) {
+      setShowDiscardDialog(true);
+    } else {
+      setShowCallDialog(false);
+      setShowDiscardDialog(false);
+    }
+  }, [game?.status]);
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col">
       <div className="flex items-center justify-between border-b border-border/40 px-4 py-2">
@@ -95,9 +136,13 @@ export default function GameTable() {
           <Badge variant={game.status === EGameStatus.PLAYING ? 'success' : 'secondary'}>
             {game.status === EGameStatus.WAITING
               ? '等待中'
-              : game.status === EGameStatus.PLAYING
-                ? '进行中'
-                : '已结束'}
+              : game.status === EGameStatus.CALLING
+                ? '叫庄中'
+                : game.status === EGameStatus.DISCARDING
+                  ? '扣牌中'
+                  : game.status === EGameStatus.PLAYING
+                    ? '进行中'
+                    : '已结束'}
           </Badge>
           {game.currentLevel && (
             <Badge variant="outline" className="gap-1">
@@ -152,6 +197,29 @@ export default function GameTable() {
 
       <div className="border-t border-border/40 bg-background/95 p-4">
         <PlayerHand cards={game.myHand} />
+
+        {/* 叫庄对话框 */}
+        {showCallDialog && (
+          <div className="mb-4">
+            <CallDealerDialog
+              onSubmit={handleCallDealer}
+              isPending={callDealerMutation.isPending}
+            />
+          </div>
+        )}
+
+        {/* 扣牌对话框 */}
+        {showDiscardDialog && (
+          <div className="mb-4">
+            <DiscardDialog
+              bottomCards={game.bottomCards}
+              onSubmit={handleDiscard}
+              isPending={discardMutation.isPending}
+            />
+          </div>
+        )}
+
+        {/* 游戏控制按钮 */}
         <div className="mt-3 flex items-center justify-center gap-2">
           {game.status === EGameStatus.WAITING && (
             <Button
@@ -162,6 +230,24 @@ export default function GameTable() {
             >
               <Play className="h-4 w-4" />
               开始游戏
+            </Button>
+          )}
+          {game.status === EGameStatus.CALLING && !showCallDialog && (
+            <Button
+              variant="game"
+              className="gap-2"
+              onClick={() => setShowCallDialog(true)}
+            >
+              叫庄
+            </Button>
+          )}
+          {game.status === EGameStatus.DISCARDING && !showDiscardDialog && (
+            <Button
+              variant="game"
+              className="gap-2"
+              onClick={() => setShowDiscardDialog(true)}
+            >
+              扣牌
             </Button>
           )}
           {game.status === EGameStatus.PLAYING && (
@@ -193,6 +279,12 @@ export default function GameTable() {
         </div>
         {playCards.isError && (
           <p className="mt-2 text-center text-sm text-destructive">{playCards.error.message}</p>
+        )}
+        {callDealerMutation.isError && (
+          <p className="mt-2 text-center text-sm text-destructive">{callDealerMutation.error.message}</p>
+        )}
+        {discardMutation.isError && (
+          <p className="mt-2 text-center text-sm text-destructive">{discardMutation.error.message}</p>
         )}
       </div>
     </div>

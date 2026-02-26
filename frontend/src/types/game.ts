@@ -2,6 +2,8 @@ import type { ICard, ECardSuit } from './card';
 
 export enum EGameStatus {
   WAITING = 'waiting',
+  CALLING = 'calling',      // 叫庄阶段
+  DISCARDING = 'discarding', // 扣牌阶段
   PLAYING = 'playing',
   FINISHED = 'finished',
 }
@@ -39,6 +41,20 @@ export interface IGameState {
   trumpSuit: ECardSuit | null;
   bottomCards: ICard[];
   scores: Record<number, number>;
+  // 叫庄相关
+  dealerSeat?: number;
+  callPhase?: string;
+  currentCaller?: number;
+  callRecords?: ICallRecord[];
+  flippedBottomCards?: ICard[];
+}
+
+export interface ICallRecord {
+  seat: number;
+  suit: string;
+  rank: string;
+  count: number;
+  timestamp: number;
 }
 
 export interface IPlayedCards {
