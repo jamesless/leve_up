@@ -1,60 +1,34 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Dependencies
+node_modules/
+frontend/node_modules/
 
-# Test binary, built with `go test -c`
-*.test
+# Build outputs
+frontend/dist/
+backend/*.exe
+backend/leve_up
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
+# Environment
+.env
+.env.local
+.env.*.local
+backend/.env
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Log files
-log/
-*.log
-server.log
-
-# IDE files
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Test results and temporary files
-test_results/
-*.tmp
+# Go
+backend/tmp/
 
-# Build artifacts
-/server
-/bin/
-/dist/
+# Logs
+*.log
+npm-debug.log*
 
-# Session and cache
-.playwright-mcp/
-.claude/projects/
-
-# Environment files
-.env
-.env.local
-
-# Debug files
-debug
-*.debug
+skills-lock.json
