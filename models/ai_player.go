@@ -37,6 +37,11 @@ func (ai *AIPlayer) DecidePlay(table *GameTable) int {
 
 // decideLeadCard chooses a card when leading a trick
 func (ai *AIPlayer) decideLeadCard(table *GameTable) int {
+	// Try to throw cards (甩牌) if we have a strong suit
+	if throwIndices := ai.tryThrowCards(table); len(throwIndices) > 0 {
+		return throwIndices[0]
+	}
+
 	// Strategy: Lead with a low card from a long suit to drain opponents
 	// Or lead with a strong card if we want to win the trick
 
@@ -80,6 +85,44 @@ func (ai *AIPlayer) decideLeadCard(table *GameTable) int {
 
 	// Play lowest card from the longest suit (conservative strategy)
 	return candidates[0]
+}
+
+// tryThrowCards attempts to find a valid throw (甩牌)
+// Returns card indices if a throw is possible, empty otherwise
+func (ai *AIPlayer) tryThrowCards(table *GameTable) []int {
+	// Group cards by suit
+	suitCards := make(map[string][]int)
+	for i, card := range ai.Hand {
+		suitCards[card.Suit] = append(suitCards[card.Suit], i)
+	}
+
+	// For each suit, check if we can throw
+	for suit, indices := range suitCards {
+		if len(indices) < 2 {
+			continue // Need at least 2 cards to throw
+		}
+
+		// Skip trump suit for throwing (trump is too valuable)
+		if suit == table.TrumpSuit {
+			continue
+		}
+
+		// Get the cards
+		var cards []Card
+		for _, idx := range indices {
+			cards = append(cards, ai.Hand[idx])
+		}
+
+		// Validate throw
+		result := ValidateThrowCards(cards, table, ai.SeatNumber)
+		if result.IsValid {
+			// Return indices of cards to throw
+			return indices
+		}
+	}
+
+	// No valid throw found
+	return nil
 }
 
 // decideFollowCard chooses a card when following a lead

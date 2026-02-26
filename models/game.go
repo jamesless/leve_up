@@ -49,6 +49,7 @@ type GameTable struct {
 	HostCalledCard *CalledCard         `json:"hostCalledCard"` // Card host called for friend
 	FriendRevealed bool                `json:"friendRevealed"` // Whether friend has been revealed
 	FriendSeat     int                 `json:"friendSeat"`     // Seat number of friend (when revealed)
+	IsSoloMode     bool                `json:"isSoloMode"`     // Whether this is 1v4 mode (called card is in dealer's hand/bottom)
 	BottomCards    []Card              `json:"bottomCards"`    // 7 bottom cards
 	CurrentPlayer  int                 `json:"currentPlayer"`  // Current player's seat (1-5)
 	CurrentTrick   []PlayedCard        `json:"currentTrick"`   // Cards in current trick
@@ -175,6 +176,22 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 	// Update game status in database
 	UpdateGameStatus(gameID, "playing")
 
+	// Log game start action
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "game_start",
+		PlayerSeat: 0,
+		PlayerID:   hostID,
+		ActionData: map[string]interface{}{
+			"starting_dealer": startingDealer,
+			"current_level":   game.CurrentLevel,
+			"player_count":    len(game.PlayerIDs),
+		},
+		ResultData: map[string]interface{}{
+			"status": "success",
+		},
+	})
+
 	return table, nil
 }
 
@@ -202,6 +219,7 @@ func GetTableGame(gameID string) (*GameTable, error) {
 }
 
 // CallFriendCard sets the card the host calls to find their friend
+// 如果叫的牌在庄家手中或底牌中，则触发1打4独打模式
 func CallFriendCard(gameID, userID, suit, value string) error {
 	table, err := GetTableGame(gameID)
 	if err != nil {
@@ -220,6 +238,39 @@ func CallFriendCard(gameID, userID, suit, value string) error {
 		Suit:  suit,
 		Value: value,
 	}
+
+	// 检查叫的牌是否在庄家手中或底牌中
+	dealerHand, ok := table.PlayerHands[table.DealerSeat]
+	if !ok {
+		return fmt.Errorf("dealer hand not found")
+	}
+
+	// 检查庄家手牌
+	for _, card := range dealerHand.Cards {
+		if card.Suit == suit && card.Value == value {
+			// 叫的牌在庄家手中，触发1打4模式
+			table.IsSoloMode = true
+			table.FriendRevealed = true
+			table.FriendSeat = table.DealerSeat // 庄家自己就是"朋友"
+			table.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	// 检查底牌
+	for _, card := range table.BottomCards {
+		if card.Suit == suit && card.Value == value {
+			// 叫的牌在底牌中，触发1打4模式
+			table.IsSoloMode = true
+			table.FriendRevealed = true
+			table.FriendSeat = table.DealerSeat // 庄家自己就是"朋友"
+			table.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	// 叫的牌不在庄家手中也不在底牌中，正常2打3模式
+	table.IsSoloMode = false
 	table.UpdatedAt = time.Now()
 
 	return nil
@@ -379,40 +430,24 @@ func getCardValue(card Card, leadSuit, trumpSuit string) int {
 }
 
 // isScoringCard checks if a card is worth points
-// 规则：只有♠5=5分，♠10=10分，♠K=10分
+// 规则：所有花色的5、10、K都是分值牌（总分300分）
 func isScoringCard(card Card) bool {
-	if card.Type == "joker" {
-		return true // Jokers are worth points
-	}
-	// 只有黑桃的5、10、K是分值牌
-	if card.Suit == "spades" {
-		if card.Value == "5" {
-			return true // ♠5 = 5分
-		}
-		if card.Value == "10" || card.Value == "K" {
-			return true // ♠10, ♠K = 10分
-		}
+	// 所有花色的5、10、K都是分值牌
+	if card.Value == "5" || card.Value == "10" || card.Value == "K" {
+		return true
 	}
 	return false
 }
 
 // getCardPoints returns the point value of a scoring card
-// 规则：♠5=5分，♠10=10分，♠K=10分，大王=20分，小王=10分
+// 规则：所有花色5=5分，10=10分，K=10分（3副牌总分300分）
 func getCardPoints(card Card) int {
-	if card.Type == "joker" {
-		if card.Value == "big" {
-			return 20 // 大王 = 20分
-		}
-		return 10 // 小王 = 10分
+	// 所有花色的5、10、K都是分值牌
+	if card.Value == "5" {
+		return 5 // 5 = 5分
 	}
-	// 只有黑桃的5、10、K是分值牌
-	if card.Suit == "spades" {
-		if card.Value == "5" {
-			return 5 // ♠5 = 5分
-		}
-		if card.Value == "10" || card.Value == "K" {
-			return 10 // ♠10, ♠K = 10分
-		}
+	if card.Value == "10" || card.Value == "K" {
+		return 10 // 10, K = 10分
 	}
 	return 0
 }
@@ -1027,6 +1062,27 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		cardsToPlay = append(cardsToPlay, hand.Cards[idx])
 	}
 
+	// Check if this is a throw (甩牌) - leading with multiple cards of same suit
+	isLead := len(table.CurrentTrick) == 0
+	if isLead && len(cardsToPlay) >= 2 {
+		// Check for throw cards validation
+		throwResult := ValidateThrowCards(cardsToPlay, table, playerSeat)
+
+		if !throwResult.IsValid && len(throwResult.ActualPlay) < len(cardsToPlay) {
+			// 甩牌失败，只出最小的牌
+			// 重新计算 cardIndices，只保留要出的牌
+			actualCardIndices := make([]int, 0, len(throwResult.ActualPlay))
+			for i, idx := range cardIndices {
+				if i < len(throwResult.ActualPlay) {
+					actualCardIndices = append(actualCardIndices, idx)
+				}
+			}
+			cardIndices = actualCardIndices
+			cardsToPlay = throwResult.ActualPlay
+			fmt.Printf("甩牌失败: %s，只出最小牌\n", throwResult.Reason)
+		}
+	}
+
 	// Validate the play (must be valid combination)
 	fmt.Printf("DEBUG: Validating %d cards: %+v\n", len(cardsToPlay), cardsToPlay)
 	if err := validateCardPlay(cardsToPlay, table); err != nil {
@@ -1050,7 +1106,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 	}
 
 	// Add all played cards to current trick
-	isLead := len(table.CurrentTrick) == 0
+	isLead = len(table.CurrentTrick) == 0
 	if isLead {
 		table.TrickLeader = playerSeat
 	}
@@ -1136,8 +1192,8 @@ func validateLeadPlay(cards []Card) error {
 		return nil
 	}
 
-	// Check for tractor (consecutive pairs of same suit)
-	if len(cards) >= 4 && len(cards)%2 == 0 {
+	// Check for tractor (consecutive pairs or triples of same suit)
+	if len(cards) >= 4 {
 		if err := validateTractor(cards); err == nil {
 			return nil // Valid tractor
 		}
@@ -1158,14 +1214,127 @@ func validateLeadPlay(cards []Card) error {
 	}
 
 	// Pair (2 cards) or Triple (3 cards) with same value and suit is valid
-	return nil
+	if len(cards) == 2 || len(cards) == 3 {
+		return nil
+	}
+
+	return fmt.Errorf("invalid card combination")
 }
 
-// validateTractor validates if cards form a tractor (consecutive pairs of same suit)
+// ThrowCardsResult represents the result of a throw cards validation
+type ThrowCardsResult struct {
+	IsValid       bool   // Whether the throw is valid
+	ActualPlay    []Card // Cards that should actually be played
+	ReturnedCards []Card // Cards that should be returned to hand
+	Reason        string // Reason for failure or success
+}
+
+// ValidateThrowCards validates if a throw (甩牌) is valid
+// 规则：甩牌时，如果其中最小的牌比所有其他玩家该花色的牌都大或相等，甩牌成功
+// 否则只出最小的那张牌，其他牌收回手里
+func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCardsResult {
+	if len(cards) < 2 {
+		return &ThrowCardsResult{
+			IsValid:    true,
+			ActualPlay: cards,
+		}
+	}
+
+	// 检查是否同花色
+	firstSuit := cards[0].Suit
+	for _, card := range cards {
+		if card.Suit != firstSuit {
+			return &ThrowCardsResult{
+				IsValid:    false,
+				ActualPlay: cards,
+				Reason:     "甩牌必须是同花色",
+			}
+		}
+	}
+
+	// 找出最小的牌
+	minCard := findMinCard(cards)
+	minValue := getCardNumericValue(minCard.Value)
+
+	// 检查所有其他玩家手中的该花色牌
+	for seat, hand := range table.PlayerHands {
+		if seat == playerSeat {
+			continue
+		}
+
+		// 检查该玩家是否有更大的该花色牌
+		for _, card := range hand.Cards {
+			if card.Suit == firstSuit {
+				cardValue := getCardNumericValue(card.Value)
+				if cardValue > minValue {
+					// 有玩家有更大的牌，甩牌失败
+					return &ThrowCardsResult{
+						IsValid:       false,
+						ActualPlay:    []Card{minCard},
+						ReturnedCards: removeCardFromSlice(cards, minCard),
+						Reason:        fmt.Sprintf("玩家%d有更大的%s牌", seat, getSuitDisplayName(firstSuit)),
+					}
+				}
+			}
+		}
+	}
+
+	// 甩牌成功
+	return &ThrowCardsResult{
+		IsValid:    true,
+		ActualPlay: cards,
+		Reason:     "甩牌成功",
+	}
+}
+
+// findMinCard finds the card with minimum value in a slice
+func findMinCard(cards []Card) Card {
+	minCard := cards[0]
+	minValue := getCardNumericValue(cards[0].Value)
+
+	for _, card := range cards {
+		value := getCardNumericValue(card.Value)
+		if value < minValue {
+			minValue = value
+			minCard = card
+		}
+	}
+
+	return minCard
+}
+
+// removeCardFromSlice removes a card from a slice (first occurrence)
+func removeCardFromSlice(cards []Card, target Card) []Card {
+	result := make([]Card, 0, len(cards))
+	found := false
+	for _, card := range cards {
+		if !found && card.Suit == target.Suit && card.Value == target.Value {
+			found = true
+			continue
+		}
+		result = append(result, card)
+	}
+	return result
+}
+
+// getSuitDisplayName returns the Chinese display name of a suit
+func getSuitDisplayName(suit string) string {
+	names := map[string]string{
+		"spades":   "黑桃",
+		"hearts":   "红桃",
+		"clubs":    "梅花",
+		"diamonds": "方片",
+		"joker":    "王",
+	}
+	return names[suit]
+}
+
+// validateTractor validates if cards form a tractor (consecutive pairs or triples of same suit)
+// 规则：连对（2对以上）或连三（2组以上三张）
 func validateTractor(cards []Card) error {
-	// Tractor must have even number of cards (at least 4)
-	if len(cards) < 4 || len(cards)%2 != 0 {
-		return fmt.Errorf("tractor must have at least 4 cards (2 pairs)")
+	// Tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)
+	if len(cards) < 4 {
+		return fmt.Errorf("tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)")
 	}
 
 	// All cards must have the same suit
@@ -1182,11 +1351,32 @@ func validateTractor(cards []Card) error {
 		valueCounts[card.Value]++
 	}
 
-	// Each value must appear exactly 2 times (pairs)
+	// Check if all values have the same count (either all 2s for pairs, or all 3s for triples)
+	var expectedCount int
+	firstValue := true
 	for _, count := range valueCounts {
-		if count != 2 {
-			return fmt.Errorf("tractor consists of consecutive pairs, each value must appear exactly 2 times")
+		if firstValue {
+			expectedCount = count
+			firstValue = false
+			// Must be either 2 (pairs) or 3 (triples)
+			if expectedCount != 2 && expectedCount != 3 {
+				return fmt.Errorf("tractor consists of consecutive pairs (2) or triples (3)")
+			}
+		} else {
+			if count != expectedCount {
+				return fmt.Errorf("tractor must be all pairs or all triples, not mixed")
+			}
 		}
+	}
+
+	// Verify total card count matches
+	if len(cards) != len(valueCounts)*expectedCount {
+		return fmt.Errorf("invalid card count for tractor")
+	}
+
+	// Must have at least 2 groups
+	if len(valueCounts) < 2 {
+		return fmt.Errorf("tractor must have at least 2 groups")
 	}
 
 	// Check if values are consecutive
@@ -1226,7 +1416,8 @@ func getCardNumericValue(value string) int {
 // 1. 相同牌型、相同数量
 // 2. 相同花色的对子
 // 3. 相同花色的单张
-// 4. 垫任意其他牌（毙牌）
+// 4. 主牌杀（无色时用主牌，牌型需完美匹配）
+// 5. 垫任意其他牌
 func validateFollowPlay(cards []Card, table *GameTable) error {
 	if len(table.CurrentTrick) == 0 {
 		return fmt.Errorf("no lead to follow")
@@ -1257,36 +1448,142 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 	// Determine lead play type
 	isLeadPair := leadCardCount == 2 && leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit
 	isLeadTriple := leadCardCount == 3 && leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value && leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit
+	isLeadTractor := isTractor(leadCards)
 
 	// Check if player's cards form a pair/triple
 	isPlayerPair := leadCardCount == 2 && cards[0].Value == cards[1].Value && cards[0].Suit == cards[1].Suit
 	isPlayerTriple := leadCardCount == 3 && cards[0].Value == cards[1].Value && cards[1].Value == cards[2].Value && cards[0].Suit == cards[1].Suit && cards[1].Suit == cards[2].Suit
+	isPlayerTractor := isTractor(cards)
+
+	// 检查玩家是否有领出花色的牌
+	hasLeadSuit := false
+	for _, card := range cards {
+		if card.Suit == leadSuit {
+			hasLeadSuit = true
+			break
+		}
+	}
 
 	// 跟牌规则优先级：
-	// 1. 相同牌型、相同数量
-	if isLeadPair && isPlayerPair {
-		if cards[0].Suit == leadSuit {
+	// 1. 有色必须跟色：相同牌型、相同数量
+	if hasLeadSuit {
+		if isLeadPair && isPlayerPair {
 			return nil // 相同牌型、相同花色
 		}
-		return fmt.Errorf("相同牌型必须跟相同花色")
-	}
-	if isLeadTriple && isPlayerTriple {
-		if cards[0].Suit == leadSuit {
+		if isLeadTriple && isPlayerTriple {
 			return nil // 相同牌型、相同花色
 		}
-		return fmt.Errorf("相同牌型必须跟相同花色")
+		if isLeadTractor && isPlayerTractor {
+			return nil // 拖拉机配拖拉机
+		}
+
+		// 2. 相同花色的对子（如果领出的是对子或三张）
+		if (isLeadPair || isLeadTriple) && !isPlayerPair && !isPlayerTriple {
+			// 检查是否有相同花色的对子
+			if hasPairInSuit(cards, leadSuit) {
+				return fmt.Errorf("有相同花色的对子，必须跟对子")
+			}
+		}
+
+		// 3. 相同花色的单张
+		return validateSingleSuitFollow(cards, leadSuit)
 	}
 
-	// 2. 相同花色的对子（如果领出的是对子或三张）
-	if (isLeadPair || isLeadTriple) && !isPlayerPair && !isPlayerTriple {
-		// 检查是否有相同花色的对子
-		if hasPairInSuit(cards, leadSuit) {
-			return fmt.Errorf("有相同花色的对子，必须跟对子")
+	// 4. 无色时：主牌杀（牌型必须完美匹配）
+	trumpSuit := table.TrumpSuit
+	if trumpSuit != "" {
+		// 检查是否使用主牌
+		allTrump := true
+		for _, card := range cards {
+			if card.Suit != trumpSuit {
+				allTrump = false
+				break
+			}
+		}
+
+		if allTrump {
+			// 主牌杀：牌型必须完美匹配
+			if isLeadPair && isPlayerPair {
+				return nil // 主牌对子杀成功
+			}
+			if isLeadTriple && isPlayerTriple {
+				return nil // 主牌三张杀成功
+			}
+			if isLeadTractor && isPlayerTractor {
+				return nil // 主牌拖拉机杀成功
+			}
+			// 如果领出的是甩牌（多张同花色但不成对子/拖拉机）
+			// 主牌也必须出同样数量和牌型
+			if !isLeadPair && !isLeadTriple && !isLeadTractor {
+				// 检查玩家的主牌是否也不是对子/拖拉机（单张组合）
+				if !isPlayerPair && !isPlayerTriple && !isPlayerTractor {
+					return nil // 主牌单张组合杀成功
+				}
+			}
+			return fmt.Errorf("主牌杀必须牌型匹配")
 		}
 	}
 
-	// 3. 相同花色的单张
-	return validateSingleSuitFollow(cards, leadSuit)
+	// 5. 垫任意其他牌
+	return nil
+}
+
+// isTractor checks if the cards form a tractor (consecutive pairs or triples)
+func isTractor(cards []Card) bool {
+	if len(cards) < 4 {
+		return false
+	}
+	firstSuit := cards[0].Suit
+	for _, card := range cards {
+		if card.Suit != firstSuit {
+			return false
+		}
+	}
+
+	valueCounts := make(map[string]int)
+	for _, card := range cards {
+		valueCounts[card.Value]++
+	}
+
+	// Check if all values have the same count (either all 2s or all 3s)
+	var expectedCount int
+	firstValue := true
+	for _, count := range valueCounts {
+		if firstValue {
+			expectedCount = count
+			firstValue = false
+			// Must be either 2 (pairs) or 3 (triples)
+			if expectedCount != 2 && expectedCount != 3 {
+				return false
+			}
+		} else {
+			if count != expectedCount {
+				return false
+			}
+		}
+	}
+
+	// Must have at least 2 groups
+	if len(valueCounts) < 2 {
+		return false
+	}
+
+	values := make([]string, 0, len(valueCounts))
+	for value := range valueCounts {
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return getCardNumericValue(values[i]) < getCardNumericValue(values[j])
+	})
+
+	for i := 1; i < len(values); i++ {
+		prevValue := getCardNumericValue(values[i-1])
+		currValue := getCardNumericValue(values[i])
+		if currValue != prevValue+1 {
+			return false
+		}
+	}
+	return true
 }
 
 // hasPairInSuit checks if player has a pair in the given suit
@@ -1398,7 +1695,7 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		lastCall := table.CallRecords[len(table.CallRecords)-2]
 		// 反庄规则：
 		// 1. 同花色反：使用相同花色、相同点数的级牌，张数必须更多
-		// 2. 升级反：使用比当前级牌高1级或以上的级牌
+		// 2. 升级反：使用比当前级牌高1级或以上的级牌 → 自己成为新庄家
 		if suit == lastCall.Suit && rank == lastCall.Rank {
 			// 同花色反，张数必须更多
 			if len(cardsToPlay) <= lastCall.Count {
@@ -1408,13 +1705,26 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 				return nil, fmt.Errorf("反主最多3张")
 			}
 		} else {
-			// 升级反
-			// 检查是否是更高级的牌
+			// 升级反：使用更高级的牌反庄，自己成为新庄家
 			currentRankValue := getCardNumericValue(lastCall.Rank)
 			newRankValue := getCardNumericValue(rank)
 			if newRankValue <= currentRankValue {
 				return nil, fmt.Errorf("升级反必须用更高级的牌")
 			}
+			// 升级反成功，更新庄家和级牌
+			table.TrumpRank = rank
+			table.DealerSeat = playerSeat
+			table.TrumpSuit = suit
+			table.HostID = table.PlayerHands[playerSeat].UserID
+			table.CallPhase = "finished"
+			table.UpdatedAt = time.Now()
+
+			// 如果是单人模式，直接进入找朋友阶段
+			if isSinglePlayerGame(table) {
+				return finalizeDealerAndStartPlaying(table)
+			}
+
+			return table, nil
 		}
 	}
 
@@ -1676,9 +1986,9 @@ func CalculateBottomMultiplier(lastTrick []PlayedCard, trumpSuit string) BottomC
 	return BottomCardMultiplier{Multiplier: 1, Reason: "单张抠底"}
 }
 
-// isValidTractor checks if cards form a valid tractor
+// isValidTractor checks if cards form a valid tractor (consecutive pairs or triples)
 func isValidTractor(cards []Card) bool {
-	if len(cards) < 4 || len(cards)%2 != 0 {
+	if len(cards) < 4 {
 		return false
 	}
 
@@ -1690,24 +2000,33 @@ func isValidTractor(cards []Card) bool {
 		}
 	}
 
-	// 检查是否每两张都是对子
-	for i := 0; i < len(cards); i += 2 {
-		if cards[i].Value != cards[i+1].Value {
-			return false
-		}
-	}
-
-	// 检查是否是连续的对子
+	// Count occurrences of each value
 	valueCounts := make(map[string]int)
 	for _, card := range cards {
 		valueCounts[card.Value]++
 	}
 
-	// 每个值应该出现2次
+	// Check if all values have the same count (either all 2s or all 3s)
+	var expectedCount int
+	firstValue := true
 	for _, count := range valueCounts {
-		if count != 2 {
-			return false
+		if firstValue {
+			expectedCount = count
+			firstValue = false
+			// Must be either 2 (pairs) or 3 (triples)
+			if expectedCount != 2 && expectedCount != 3 {
+				return false
+			}
+		} else {
+			if count != expectedCount {
+				return false
+			}
 		}
+	}
+
+	// Must have at least 2 groups
+	if len(valueCounts) < 2 {
+		return false
 	}
 
 	// 检查是否连续

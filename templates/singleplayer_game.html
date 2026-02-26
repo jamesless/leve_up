@@ -1014,20 +1014,27 @@ function renderMyHand(preserveOrder = false) {
 
             const cardEl = document.querySelector(`[data-index="${index}"]`);
             const clickedCard = MY_HAND.cards[index];
+            const isLead = !GAME_DATA.currentTrick || GAME_DATA.currentTrick.length === 0;
 
             // If no card is selected yet, select this one and find playable cards
             if (selectedCardIndices.size === 0) {
                 selectedCardIndices.add(index);
                 firstSelectedCard = clickedCard;
                 cardEl.classList.add('selected');
-                highlightPlayableCards(index);
+                highlightPlayableCards(index, isLead);
                 updateSelectionCounter();
                 updatePlayButton();
                 return;
             }
 
-            // Check if clicked card has same value as first selected card
+            // Check if clicked card can be played together with first selected card
             const isFirstCardValue = clickedCard.value === firstSelectedCard.value;
+            const isFirstCardSuit = clickedCard.suit === firstSelectedCard.suit;
+            
+            // For leading: allow same suit cards (for throw) or same value+suit (for pairs/triples)
+            const canPlayTogether = isLead 
+                ? (isFirstCardSuit || (isFirstCardValue && isFirstCardSuit))
+                : (isFirstCardValue && isFirstCardSuit);
 
             // If clicking the same card, deselect it
             if (selectedCardIndices.has(index)) {
@@ -1045,8 +1052,8 @@ function renderMyHand(preserveOrder = false) {
                 return;
             }
 
-            // If clicking a card with same value as first selected, add to selection
-            if (isFirstCardValue) {
+            // If clicking a card that can be played together, add to selection
+            if (canPlayTogether) {
                 selectedCardIndices.add(index);
                 cardEl.classList.add('selected');
                 updateSelectionCounter();
@@ -1068,25 +1075,32 @@ function renderMyHand(preserveOrder = false) {
             selectedCardIndices.add(index);
             firstSelectedCard = clickedCard;
             cardEl.classList.add('selected');
-            highlightPlayableCards(index);
+            highlightPlayableCards(index, isLead);
             updateSelectionCounter();
             updatePlayButton();
         }
 
-        function highlightPlayableCards(selectedIndex) {
+        function highlightPlayableCards(selectedIndex, isLead) {
             const selectedCard = MY_HAND.cards[selectedIndex];
             playableCardIndices.clear();
 
-            // Highlight cards with the same value AND same suit (for pairs, triples, etc.)
             MY_HAND.cards.forEach((card, idx) => {
                 if (idx !== selectedIndex) {
                     const cardEl = document.querySelector(`[data-index="${idx}"]`);
-                    if (card.value === selectedCard.value && card.suit === selectedCard.suit) {
-                        // Same value AND same suit - can be played together as pair/triple
-                        playableCardIndices.add(idx);
-                        cardEl.classList.add('playable');
+                    
+                    if (isLead) {
+                        // Leading: highlight cards with same suit (for throw) or same value+suit (for pairs/triples)
+                        if (card.suit === selectedCard.suit) {
+                            playableCardIndices.add(idx);
+                            cardEl.classList.add('playable');
+                        }
+                    } else {
+                        // Following: only highlight cards with same value AND same suit (for pairs/triples)
+                        if (card.value === selectedCard.value && card.suit === selectedCard.suit) {
+                            playableCardIndices.add(idx);
+                            cardEl.classList.add('playable');
+                        }
                     }
-                    // Don't dim other cards - user can select any card to start new combination
                 }
             });
         }

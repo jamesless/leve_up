@@ -133,6 +133,49 @@ func createTables() error {
 		return fmt.Errorf("failed to create game_records table: %w", err)
 	}
 
+	// Create game_action_logs table for recording all game actions
+	gameActionLogsTable := `
+	CREATE TABLE IF NOT EXISTS game_action_logs (
+		id SERIAL PRIMARY KEY,
+		game_id VARCHAR(64) NOT NULL,
+		action_type VARCHAR(50) NOT NULL,
+		player_seat INT NOT NULL,
+		player_id VARCHAR(64),
+		action_data JSONB NOT NULL,
+		result_data JSONB,
+		timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+		FOREIGN KEY (player_id) REFERENCES users(id) ON DELETE SET NULL
+	)`
+
+	if _, err := db.Exec(gameActionLogsTable); err != nil {
+		return fmt.Errorf("failed to create game_action_logs table: %w", err)
+	}
+
+	// Create index on game_id and timestamp for efficient querying
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_game_action_logs_game_id_timestamp ON game_action_logs(game_id, timestamp)`); err != nil {
+		log.Println("Warning: failed to create game_action_logs index:", err)
+	}
+
+	// Create game_replays table for storing complete game replay data
+	gameReplaysTable := `
+	CREATE TABLE IF NOT EXISTS game_replays (
+		id SERIAL PRIMARY KEY,
+		game_id VARCHAR(64) UNIQUE NOT NULL,
+		initial_state JSONB NOT NULL,
+		final_state JSONB NOT NULL,
+		total_actions INT DEFAULT 0,
+		duration_seconds INT DEFAULT 0,
+		winner_team VARCHAR(20),
+		final_score INT DEFAULT 0,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+	)`
+
+	if _, err := db.Exec(gameReplaysTable); err != nil {
+		return fmt.Errorf("failed to create game_replays table: %w", err)
+	}
+
 	log.Println("Database tables created/verified successfully")
 	return nil
 }
