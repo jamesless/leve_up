@@ -2212,11 +2212,19 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		playerLevel := playerUser.Level
 
 		// 判断反庄方式
-		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank）
+		// 特殊情况：当反庄者的级牌也是2（与临时庄家相同）时，用2反庄会转移庄家
+		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank 且 rank != playerLevel）
 		// 方式二：用玩家自己的级牌反庄（rank == playerLevel）
 
-		if rank == lastCall.Rank {
-			// 方式一：用临时庄家的级牌反庄
+		if rank == lastCall.Rank && rank == playerLevel {
+			// 特殊情况：反庄者的级牌也是2（与临时庄家相同）
+			// 使用2反庄时，庄家转移给反庄者，同时改变主牌花色
+			table.TrumpRank = rank
+			table.DealerSeat = playerSeat
+			table.TrumpSuit = suit
+			table.HostID = userID
+		} else if rank == lastCall.Rank {
+			// 方式一：用临时庄家的级牌反庄（但不是自己的级牌）
 			// 庄家不变，只变主牌花色
 			table.TrumpSuit = suit
 			// 庄家保持为lastCall.Seat

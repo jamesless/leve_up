@@ -415,7 +415,7 @@ func (ts *TestSuite) TestMultipleRounds() {
 	fmt.Println("\n[测试7] 多轮出牌测试")
 	ts.AddResult("轮次递进", true, "每轮5人依次出牌，完成后清空", nil)
 	ts.AddResult("分数收集", true, "赢家收集本轮所有分牌", nil)
-	ts.AddResult("朋友揭示", true, "第一个打出叫牌的玩家成为盟友", nil)
+	ts.AddResult("朋友揭示", true, "第N个打出叫牌的玩家成为盟友（N为庄家指定）", nil)
 }
 
 // TestGameStateTransitions tests game state changes

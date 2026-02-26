@@ -867,8 +867,10 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 	}
 
 	// Start the game if not started
+	var table *models.GameTable
+
 	if game.Status == "waiting" {
-		table, err := models.StartSinglePlayerGame(gameID, user.ID)
+		table, err = models.StartSinglePlayerGame(gameID, user.ID)
 		if err != nil {
 			middleware.SendError(c, http.StatusBadRequest, err.Error())
 			return
@@ -883,7 +885,7 @@ func SinglePlayerGamePageHandler(c *gin.Context) {
 	}
 
 	// Get table state
-	table, err := models.GetTableGame(gameID)
+	table, err = models.GetTableGame(gameID)
 	if err != nil {
 		middleware.SendError(c, http.StatusInternalServerError, "Failed to get game state")
 		return
