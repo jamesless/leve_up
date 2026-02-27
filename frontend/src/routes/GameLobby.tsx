@@ -1,12 +1,34 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Plus, Bot, Users, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Bot, Users, Loader2, RefreshCw, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { useCurrentUser } from '@/hooks/useAuth';
-import { useCreateGame, useCreateSinglePlayerGame, useJoinGame } from '@/hooks/useGame';
+import { useCreateGame, useCreateSinglePlayerGame, useJoinGame, useGameList } from '@/hooks/useGame';
+
+interface GameRoom {
+  id: string;
+  name: string;
+  hostId: string;
+  playerIds: string[];
+  maxPlayers: number;
+  status: string;
+  currentLevel: string;
+  createdAt: string;
+  players: Array<{ id: string; username: string; level: number }>;
+}
+
+const statusLabels: Record<string, string> = {
+  waiting: '等待中',
+  calling: '抢庄中',
+  calling_friend: '叫朋友中',
+  discarding: '扣牌中',
+  playing: '游戏中',
+  finished: '已结束',
+};
 
 export default function GameLobby() {
   const { isAuthenticated, user } = useAuthStore();
@@ -17,6 +39,9 @@ export default function GameLobby() {
   const createGame = useCreateGame();
   const createSingle = useCreateSinglePlayerGame();
   const joinGame = useJoinGame();
+  const { data: gamesData, isLoading: isLoadingGames, refetch } = useGameList();
+
+  const games = (gamesData?.games as GameRoom[]) || [];
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
@@ -89,17 +114,87 @@ export default function GameLobby() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold">房间列表</h2>
-          <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground">
-            <RefreshCw className="h-3.5 w-3.5" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-muted-foreground"
+            onClick={() => refetch()}
+            disabled={isLoadingGames}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoadingGames ? 'animate-spin' : ''}`} />
             刷新
           </Button>
         </div>
 
-        <div className="rounded-lg border border-dashed border-border/60 py-16 text-center">
-          <Users className="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" />
-          <p className="text-muted-foreground">暂无可用房间</p>
-          <p className="mt-1 text-sm text-muted-foreground/60">创建一个房间或开始单人模式</p>
-        </div>
+        {isLoadingGames ? (
+          <div className="rounded-lg border border-dashed border-border/60 py-16 text-center">
+            <Loader2 className="mx-auto mb-3 h-10 w-10 animate-spin text-muted-foreground/30" />
+            <p className="text-muted-foreground">加载中...</p>
+          </div>
+        ) : games.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/60 py-16 text-center">
+            <Users className="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" />
+            <p className="text-muted-foreground">暂无可用房间</p>
+            <p className="mt-1 text-sm text-muted-foreground/60">创建一个房间或开始单人模式</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {games.map((game) => {
+              const playerCount = game.players?.length || 0;
+              const isHost = user && game.hostId === user.id;
+              const canJoin = !isHost && playerCount < game.maxPlayers && game.status === 'waiting';
+
+              return (
+                <Card
+                  key={game.id}
+                  className={`transition-all hover:shadow-md ${
+                    canJoin ? 'cursor-pointer border-primary/50 hover:border-primary' : ''
+                  }`}
+                  onClick={() => canJoin && joinGame.mutate(game.id)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-base truncate flex items-center gap-2">
+                          {game.name}
+                          {isHost && (
+                            <Badge variant="secondary" className="text-xs">
+                              <Crown className="h-3 w-3 mr-1" />
+                              我的
+                            </Badge>
+                          )}
+                        </CardTitle>
+                      </div>
+                      <Badge variant="outline">{statusLabels[game.status] || game.status}</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">
+                        {playerCount}/{game.maxPlayers} 人
+                      </span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="text-muted-foreground">
+                        {game.currentLevel ? `当前等级: ${game.currentLevel}` : '未开始'}
+                      </span>
+                    </div>
+                    {game.players && game.players.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {game.players.map((player) => (
+                          <Badge key={player.id} variant="secondary" className="text-xs">
+                            {player.username}
+                            {player.id === game.hostId && <Crown className="ml-1 h-3 w-3 text-yellow-600" />}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {joinGame.isError && (

@@ -5,6 +5,9 @@ import type {
   IPlayCardRequest,
 } from '@/types';
 
+export const listGames = () =>
+  get<{ success: boolean; games: unknown[] }>('/games');
+
 export const createGame = (name: string) =>
   post<ICreateGameResponse>('/game/create', { name });
 

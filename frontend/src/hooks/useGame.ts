@@ -3,6 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import * as gameService from '@/services/game';
 import type { IPlayCardRequest } from '@/types';
 
+export function useGameList() {
+  return useQuery({
+    queryKey: ['games'],
+    queryFn: () => gameService.listGames(),
+    refetchInterval: 5000,
+  });
+}
+
 export function useGameTable(gameId: string) {
   return useQuery({
     queryKey: ['gameTable', gameId],

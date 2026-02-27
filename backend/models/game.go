@@ -10,15 +10,19 @@ import (
 
 // GameState represents the current state of a game
 type GameState struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	HostID       string    `json:"hostId"`
-	PlayerIDs    []string  `json:"playerIds"`
-	MaxPlayers   int       `json:"maxPlayers"`
-	Status       string    `json:"status"` // waiting, playing, finished
-	CurrentLevel string    `json:"currentLevel"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	HostID             string    `json:"hostId"`
+	PlayerIDs          []string  `json:"playerIds"`
+	MaxPlayers         int       `json:"maxPlayers"`
+	Status             string    `json:"status"` // waiting, playing, finished
+	CurrentLevel       string    `json:"currentLevel"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+	PreviousDealerSeat int       `json:"previousDealerSeat,omitempty"` // 上一局庄家座位号
+	PreviousWinnerTeam string    `json:"previousWinnerTeam,omitempty"` // 上一局获胜队伍
+	PreviousFriendSeat int       `json:"previousFriendSeat,omitempty"` // 上一局朋友座位号
+	PreviousIsSolo     bool      `json:"previousIsSolo,omitempty"`     // 上一局是否是1v4
 }
 
 // Card represents a playing card
@@ -69,6 +73,17 @@ type GameTable struct {
 	TrumpRank          string       `json:"trumpRank"`          // 级牌点数（如"2"表示打2级）
 	FlippedBottomCards []Card       `json:"flippedBottomCards"` // 已翻开的底牌
 	CallRecords        []CallRecord `json:"callRecords"`        // 抢庄记录
+
+	// 上一局结果（用于确定下一局起始发牌人）
+	PreviousResult *PreviousGameResult `json:"previousResult,omitempty"` // 上一局结果
+}
+
+// PreviousGameResult 记录上一局的结果，用于确定下一局的起始发牌人
+type PreviousGameResult struct {
+	WinnerTeam string `json:"winnerTeam"` // 获胜队伍: "host" 或 "guest"
+	DealerSeat int    `json:"dealerSeat"` // 上一局庄家座位号
+	FriendSeat int    `json:"friendSeat"` // 上一局朋友座位号（如果是2v3）
+	IsSoloMode bool   `json:"isSoloMode"` // 是否是1v4模式
 }
 
 // CallRecord represents a bid for dealer
@@ -134,8 +149,23 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 	// Deal cards
 	hands, bottomCards := DealCards(5)
 
-	// Determine starting dealer (random for first game)
-	startingDealer := rand.Intn(5) + 1 // Random seat 1-5
+	// Determine starting dealer based on previous game result
+	// 规则2.2：起始发牌者根据上一局结果确定
+	startingDealer := 1 // 默认值
+	if game.PreviousDealerSeat == 0 {
+		// 首局：随机确定起始发牌者
+		startingDealer = rand.Intn(5) + 1
+	} else {
+		// 有上一局结果，根据规则确定
+		// 查询上一局的详细结果
+		prevResult, err := getPreviousGameResult(gameID)
+		if err != nil {
+			// 如果查询失败，使用默认值
+			startingDealer = rand.Intn(5) + 1
+		} else {
+			startingDealer = determineStartingDealer(prevResult, game.PreviousDealerSeat)
+		}
+	}
 
 	// Initialize game table
 	table := &GameTable{
@@ -247,12 +277,13 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 
 	// 叫牌限制：不可以叫本轮场上已经亮过的牌（叫庄、反庄时亮出的牌）
 	// 检查CallRecords中记录的所有叫庄、反庄时亮出的牌
+	// 规则：如果是级牌，且与之前叫庄/反庄的花色相同，则不能叫
 	for _, record := range table.CallRecords {
-		if record.Rank == value {
-			// 检查花色：如果是同花色的级牌，则不能叫
-			// 注意：record.Suit是主牌花色，不是具体某张牌的花色
-			// 这里需要检查是否叫了已经亮过的级牌
-			return fmt.Errorf("不可以叫本轮场上已经亮过的牌")
+		// record.Rank 是级牌点数，record.Suit 是叫庄时用的花色
+		// 例如：用红桃2叫庄，则记录为 {Rank: "2", Suit: "hearts"}
+		// 表示亮出了红桃2，不能再叫红桃2，但可以叫方片2
+		if record.Rank == value && record.Suit == suit {
+			return fmt.Errorf("不可以叫本轮场上已经亮过的牌: %s%s", suit, value)
 		}
 	}
 
@@ -693,6 +724,26 @@ func getCardPoints(card Card) int {
 	return 0
 }
 
+// calculateBottomCardsMultiplier 计算抠底倍数
+// 根据规则6.2：单张抠底×1，对子抠底×2，三张抠底×4，拖拉机按对应牌型翻倍
+func calculateBottomCardsMultiplier(cardType string) int {
+	switch cardType {
+	case "single":
+		return 1
+	case "pair":
+		return 2
+	case "triple":
+		return 4
+	case "tractor":
+		// 拖拉机由多个对子或三张组成，倍数 = 牌型数量 × 对应倍数
+		// 例如：连对（2个对子）= 2 × 2 = 4，连三（2个三张）= 2 × 4 = 8
+		// 这里需要根据实际拖拉机组成计算，暂时返回最小倍数
+		return 2 // 最小倍数
+	default:
+		return 1
+	}
+}
+
 // GetPlayerHand returns a player's hand (only for that player)
 func GetPlayerHand(gameID, userID string) (*PlayerHand, error) {
 	table, err := GetTableGame(gameID)
@@ -892,7 +943,7 @@ func StartSinglePlayerGame(gameID, hostID string) (*GameTable, error) {
 	return table, nil
 }
 
-// AIPlayTurn makes AI players play until it's the human's turn
+// AIPlayTurn makes AI players play. In single-player mode, also plays for the human.
 func AIPlayTurn(gameID string) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
@@ -903,15 +954,31 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 		return nil, fmt.Errorf("game not in playing state")
 	}
 
+	// Check if this is a single-player game
+	singlePlayer := isSinglePlayerGame(table)
+	fmt.Printf("DEBUG AIPlayTurn: singlePlayer=%v, CurrentPlayer=%d, Status=%s\n", singlePlayer, table.CurrentPlayer, table.Status)
+
 	// Keep playing while it's an AI player's turn (seats 2-5)
-	maxIterations := 10 // Prevent infinite loop (increased to handle full round)
+	// In single-player mode, also play for the human (seat 1)
+	maxIterations := 50 // Prevent infinite loop (increased to handle multiple rounds)
 	iterations := 0
 
-	for table.CurrentPlayer != 1 && iterations < maxIterations {
+	for iterations < maxIterations {
+		fmt.Printf("DEBUG AIPlayTurn iteration %d: CurrentPlayer=%d, singlePlayer=%v\n", iterations, table.CurrentPlayer, singlePlayer)
+
+		// In multiplayer mode, stop at human player (seat 1)
+		// In single-player mode, play for everyone
+		if !singlePlayer && table.CurrentPlayer == 1 {
+			fmt.Printf("DEBUG AIPlayTurn: Breaking at human player (multiplayer mode)\n")
+			break
+		}
+
 		hand, ok := table.PlayerHands[table.CurrentPlayer]
 		if !ok {
 			return nil, fmt.Errorf("player %d not found", table.CurrentPlayer)
 		}
+
+		fmt.Printf("DEBUG AIPlayTurn: Player %d (%s) has %d cards\n", table.CurrentPlayer, hand.UserID, len(hand.Cards))
 
 		// Create AI player
 		ai := &AIPlayer{
@@ -922,6 +989,7 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 
 		// Decide which cards to play
 		cardIndices := ai.DecidePlay(table)
+		fmt.Printf("DEBUG AIPlayTurn: Player %d decided to play cards: %v\n", table.CurrentPlayer, cardIndices)
 
 		// Play the cards
 		_, err = PlayCardsGame(gameID, hand.UserID, cardIndices)
@@ -930,10 +998,21 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 		}
 
 		// Refresh table state
-		table, _ = GetTableGame(gameID)
+		table, err = GetTableGame(gameID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if game finished
+		if table.Status != "playing" {
+			fmt.Printf("DEBUG AIPlayTurn: Game finished, status=%s\n", table.Status)
+			break
+		}
+
 		iterations++
 	}
 
+	fmt.Printf("DEBUG AIPlayTurn: Completed after %d iterations, currentPlayer=%d\n", iterations, table.CurrentPlayer)
 	return table, nil
 }
 
@@ -1247,7 +1326,7 @@ func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
 }
 
 // RecordGameResult records the result of a game for all players
-func RecordGameResult(gameID string, results []GameResult) error {
+func RecordGameResult(gameID string, results []GameResult, dealerSeat int, winnerTeam string, friendSeat int, isSolo bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -1316,7 +1395,81 @@ func RecordGameResult(gameID string, results []GameResult) error {
 		},
 	})
 
+	// Update game status with previous result info for next game
+	// 保存上一局结果到数据库，供下一局使用
+	if _, err := tx.Exec(`
+		UPDATE games
+		SET status = 'finished',
+		    previous_dealer_seat = $2,
+		    previous_winner_team = $3,
+		    previous_friend_seat = $4,
+		    previous_is_solo = $5
+		WHERE id = $1
+	`, gameID, dealerSeat, winnerTeam, friendSeat, isSolo); err != nil {
+		return err
+	}
+
 	return tx.Commit()
+}
+
+// determineStartingDealer 根据上一局结果确定起始发牌人
+// 规则2.2：
+// - 庄家赢（1V4）：庄家当起始发牌人
+// - 庄家赢（2V3）：庄家的朋友当起始发牌人
+// - 庄家输：逆时针最靠近庄家的玩家当起始发牌人
+func determineStartingDealer(prevResult *PreviousGameResult, prevDealerSeat int) int {
+	if prevResult == nil {
+		return 1 // 默认值
+	}
+
+	// 检查上一局庄家是否获胜
+	if prevResult.WinnerTeam == "host" {
+		// 庄家方获胜
+		if prevResult.IsSoloMode {
+			// 1V4模式：庄家当起始发牌人
+			return prevDealerSeat
+		} else {
+			// 2V3模式：庄家的朋友当起始发牌人
+			return prevResult.FriendSeat
+		}
+	} else {
+		// 庄家输：逆时针最靠近庄家的玩家
+		// 逆时针顺序：1→5→4→3→2→1
+		// 例如庄家在1号位，逆时针最靠近的是5号位
+		return ((prevDealerSeat - 1 - 1 + 5) % 5) + 1
+	}
+}
+
+// getPreviousGameResult 从数据库获取上一局的结果
+func getPreviousGameResult(gameID string) (*PreviousGameResult, error) {
+	var winnerTeam string
+	var dealerSeat, friendSeat int
+	var isSolo bool
+
+	err := db.QueryRow(`
+		SELECT previous_winner_team, previous_dealer_seat,
+		       previous_friend_seat, previous_is_solo
+		FROM games WHERE id = $1
+	`, gameID).Scan(&winnerTeam, &dealerSeat, &friendSeat, &isSolo)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no previous game result found")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 如果没有上一局结果（全是默认值）
+	if winnerTeam == "" && dealerSeat == 0 {
+		return nil, fmt.Errorf("no valid previous game result")
+	}
+
+	return &PreviousGameResult{
+		WinnerTeam: winnerTeam,
+		DealerSeat: dealerSeat,
+		FriendSeat: friendSeat,
+		IsSoloMode: isSolo,
+	}, nil
 }
 
 // GameResult represents the result for a single player
@@ -1443,9 +1596,13 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 
 	// Remove cards from hand (remove in reverse order to preserve indices)
 	sort.Slice(cardIndices, func(i, j int) bool { return cardIndices[i] > cardIndices[j] })
+	fmt.Printf("DEBUG: Before removing cards, hand has %d cards\n", len(hand.Cards))
 	for _, idx := range cardIndices {
 		hand.Cards = append(hand.Cards[:idx], hand.Cards[idx+1:]...)
 	}
+	// Update the hand in the table to ensure the reference is correct
+	table.PlayerHands[playerSeat].Cards = hand.Cards
+	fmt.Printf("DEBUG: After removing %d cards, hand has %d cards\n", len(cardIndices), len(hand.Cards))
 
 	// Add all played cards to current trick
 	isLead = len(table.CurrentTrick) == 0
@@ -1526,6 +1683,16 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		}
 		table.TricksWon = append(table.TricksWon, trickCards)
 
+		// 判断最后一圈的牌型（用于抠底计算）
+		// 获取赢家出的牌
+		var winnerCards []Card
+		for _, pc := range table.CurrentTrick {
+			if pc.Seat == winner {
+				winnerCards = append(winnerCards, pc.Card)
+			}
+		}
+		lastTrickCardType := determineCardType(winnerCards)
+
 		// 记录回合结束日志
 		LogGameAction(GameActionLogRequest{
 			GameID:     gameID,
@@ -1573,13 +1740,16 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 				}
 			}
 
-			// Add bottom cards to score if non-host team won last trick
+			// Add bottom cards to score if non-host team won last trick (抠底)
 			if winner != table.DealerSeat && (!table.FriendRevealed || winner != table.FriendSeat) {
-				// Non-host team won last trick - bottom cards count double
+				// Non-host team won last trick - 根据抠底牌型计算倍数
 				if table.BottomCards != nil {
+					multiplier := calculateBottomCardsMultiplier(lastTrickCardType)
 					for _, bottomCard := range table.BottomCards {
-						totalPoints += getCardPoints(bottomCard) * 2
+						totalPoints += getCardPoints(bottomCard) * multiplier
 					}
+					// 记录抠底信息
+					fmt.Printf("抠底：赢家=%d，牌型=%s，倍数=%d\n", winner, lastTrickCardType, multiplier)
 				}
 			}
 
@@ -1644,7 +1814,11 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 				result.GameResults = gameResults
 
 				// Record game result and create replay
-				if err := RecordGameResult(gameID, gameResults); err != nil {
+				friendSeat := table.FriendSeat
+				if !table.FriendRevealed {
+					friendSeat = 0
+				}
+				if err := RecordGameResult(gameID, gameResults, table.DealerSeat, result.WinnerTeam, friendSeat, isSolo); err != nil {
 					fmt.Printf("Failed to record game result: %v\n", err)
 				}
 
@@ -1685,6 +1859,10 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 	}
 
 	table.LastPlay = result
+
+	// Save the updated table state back to activeGames
+	activeGames[gameID] = table
+
 	return result, nil
 }
 
@@ -2547,7 +2725,8 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 func isSinglePlayerGame(table *GameTable) bool {
 	aiCount := 0
 	for _, hand := range table.PlayerHands {
-		if len(hand.UserID) >= 3 && hand.UserID[:3] == "ai_" {
+		// Check for AI prefix (both "ai_" and "ai-" formats)
+		if len(hand.UserID) >= 3 && (hand.UserID[:3] == "ai_" || hand.UserID[:3] == "ai-") {
 			aiCount++
 		}
 	}
@@ -2689,23 +2868,30 @@ func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
 		}
 	}
 
-	// 进入扣牌阶段，庄家需要从手牌中选择7张牌扣回底牌
-	table.Status = "discarding"
-	table.CallPhase = "discarding"
+	// 规则4.1-4.2：庄家流程
+	// 1. 拿底牌（上面已完成）
+	// 2. 叫朋友（进入calling_friend状态）
+	// 3. 扣回底牌（叫朋友完成后进行）
+	table.Status = "calling_friend"
+	table.CallPhase = "calling_friend"
 	table.UpdatedAt = time.Now()
 
 	return table, nil
 }
 
 // DiscardBottomCards 庄家扣牌（选择7张牌扣回底牌）
+// 规则4.1：庄家在叫朋友之后扣回7张底牌
 func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
 	}
 
-	if table.Status != "discarding" {
-		return nil, fmt.Errorf("game not in discarding phase")
+	// 允许在calling_friend或discarding状态下扣牌
+	// calling_friend：庄家刚叫完朋友，准备扣牌
+	// discarding：向后兼容，实际应该统一使用calling_friend
+	if table.Status != "calling_friend" && table.Status != "discarding" {
+		return nil, fmt.Errorf("game not in calling_friend phase, current status: %s", table.Status)
 	}
 
 	// 验证只有庄家可以扣牌
@@ -2766,18 +2952,11 @@ func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameT
 		},
 	})
 
-	// 检查是否已经叫了朋友
-	if table.HostCalledCard == nil {
-		// 进入找朋友阶段
-		table.Status = "calling_friend"
-		table.CallPhase = "calling_friend"
-	} else {
-		// 已经叫了朋友，直接进入出牌阶段
-		table.Status = "playing"
-		table.CurrentPlayer = table.DealerSeat // 庄家先出牌
-		table.CallPhase = "finished"
-	}
-
+	// 扣牌完成后，进入出牌阶段
+	// 规则：扣牌完成后开始出牌，庄家先出
+	table.Status = "playing"
+	table.CurrentPlayer = table.DealerSeat
+	table.CallPhase = "finished"
 	table.UpdatedAt = time.Now()
 
 	return table, nil

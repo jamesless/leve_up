@@ -210,6 +210,45 @@ func CreateGame(c *gin.Context) {
 	})
 }
 
+// ListGames returns all active game rooms
+func ListGames(c *gin.Context) {
+	games, err := models.ListGames()
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, "Failed to get games list")
+		return
+	}
+
+	// Get player details for each game
+	type GameWithPlayers struct {
+		*models.GameState
+		Players []map[string]interface{} `json:"players"`
+	}
+
+	result := make([]GameWithPlayers, 0, len(games))
+	for _, game := range games {
+		players := make([]map[string]interface{}, 0)
+		for _, playerID := range game.PlayerIDs {
+			if user, err := models.GetUserByID(playerID); err == nil {
+				players = append(players, map[string]interface{}{
+					"id":       user.ID,
+					"username": user.Username,
+					"level":    user.Level,
+				})
+			}
+		}
+
+		result = append(result, GameWithPlayers{
+			GameState: game,
+			Players:   players,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"games":   result,
+	})
+}
+
 // GetGame retrieves a game by ID
 func GetGame(c *gin.Context) {
 	gameID := c.Param("id")
@@ -617,32 +656,71 @@ func GetGameTableHandler(c *gin.Context) {
 	myPosition := 0
 	myHand := make([]models.Card, 0)
 
-	for seat := 1; seat <= 5; seat++ {
-		if hand, ok := table.PlayerHands[seat]; ok {
-			username := fmt.Sprintf("玩家%d", seat)
-			isAI := strings.HasPrefix(hand.UserID, "ai_")
-			if isAI {
-				username = fmt.Sprintf("AI-%d", seat)
-			} else if u, err := models.GetUserByID(hand.UserID); err == nil {
-				username = u.Username
-			}
+	// 如果游戏还在等待状态，从数据库获取玩家列表
+	if table.Status == "waiting" {
+		game, err := models.GetGame(gameID)
+		if err == nil {
+			for i, playerID := range game.PlayerIDs {
+				var username string
+				var isAI bool
 
-			playerInfo := map[string]interface{}{
-				"id":        seat,
-				"userId":    hand.UserID,
-				"position":  seat,
-				"username":  username,
-				"isReady":   table.Status != "waiting",
-				"isAI":      isAI,
-				"cardCount": len(hand.Cards),
-				"isFriend":  hand.IsFriend,
-			}
-			players = append(players, playerInfo)
+				if strings.HasPrefix(playerID, "ai_") {
+					isAI = true
+					// Extract AI number from playerID
+					aiNum := strings.TrimPrefix(playerID, "ai_")
+					username = fmt.Sprintf("AI-%s", aiNum)
+				} else if u, err := models.GetUserByID(playerID); err == nil {
+					username = u.Username
+				} else {
+					username = fmt.Sprintf("玩家%d", i+1)
+				}
 
-			scores[seat] = hand.Score
-			if hand.UserID == user.ID {
-				myPosition = seat
-				myHand = hand.Cards
+				playerInfo := map[string]interface{}{
+					"id":        i + 1,
+					"userId":    playerID,
+					"position":  i + 1,
+					"username":  username,
+					"isReady":   false,
+					"isAI":      isAI,
+					"cardCount": 0,
+					"isFriend":  false,
+				}
+				players = append(players, playerInfo)
+
+				if playerID == user.ID {
+					myPosition = i + 1
+				}
+			}
+		}
+	} else {
+		// 游戏已开始，从 PlayerHands 获取信息
+		for seat := 1; seat <= 5; seat++ {
+			if hand, ok := table.PlayerHands[seat]; ok {
+				username := fmt.Sprintf("玩家%d", seat)
+				isAI := strings.HasPrefix(hand.UserID, "ai_")
+				if isAI {
+					username = fmt.Sprintf("AI-%d", seat)
+				} else if u, err := models.GetUserByID(hand.UserID); err == nil {
+					username = u.Username
+				}
+
+				playerInfo := map[string]interface{}{
+					"id":        seat,
+					"userId":    hand.UserID,
+					"position":  seat,
+					"username":  username,
+					"isReady":   table.Status != "waiting",
+					"isAI":      isAI,
+					"cardCount": len(hand.Cards),
+					"isFriend":  hand.IsFriend,
+				}
+				players = append(players, playerInfo)
+
+				scores[seat] = hand.Score
+				if hand.UserID == user.ID {
+					myPosition = seat
+					myHand = hand.Cards
+				}
 			}
 		}
 	}
@@ -669,18 +747,18 @@ func GetGameTableHandler(c *gin.Context) {
 	}
 
 	gamePayload := map[string]interface{}{
-		"id":           table.GameID,
-		"status":       table.Status,
-		"currentLevel": table.CurrentLevel,
+		"id":            table.GameID,
+		"status":        table.Status,
+		"currentLevel":  table.CurrentLevel,
 		"currentPlayer": table.CurrentPlayer,
-		"dealerTeam":   dealerTeam,
-		"currentTrick": currentTrick,
-		"players":      players,
-		"myHand":       myHand,
-		"myPosition":   myPosition,
-		"trumpSuit":    trumpSuit,
-		"bottomCards":  table.BottomCards,
-		"scores":       scores,
+		"dealerTeam":    dealerTeam,
+		"currentTrick":  currentTrick,
+		"players":       players,
+		"myHand":        myHand,
+		"myPosition":    myPosition,
+		"trumpSuit":     trumpSuit,
+		"bottomCards":   table.BottomCards,
+		"scores":        scores,
 	}
 
 	c.JSON(http.StatusOK, gin.H{

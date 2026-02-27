@@ -46,8 +46,11 @@ func InitDB() error {
 		sqlitePath := getEnv("SQLITE_PATH", "game.db")
 		log.Printf("Using SQLite database: %s", sqlitePath)
 
+		// Enable WAL mode for better concurrency
+		sqlitePathWithWAL := fmt.Sprintf("file:%s?_journal_mode=WAL&_timeout=5000&_synchronous=NORMAL", sqlitePath)
+
 		var err error
-		db, err = sql.Open("sqlite3", sqlitePath)
+		db, err = sql.Open("sqlite3", sqlitePathWithWAL)
 		if err != nil {
 			return fmt.Errorf("failed to open sqlite database: %w", err)
 		}
@@ -57,11 +60,13 @@ func InitDB() error {
 			return fmt.Errorf("failed to ping sqlite database: %w", err)
 		}
 
-		// Set connection pool settings
-		db.SetMaxOpenConns(1) // SQLite doesn't support multiple connections well
-		db.SetMaxIdleConns(1)
+		// Set connection pool settings - allow multiple connections with WAL mode
+		db.SetMaxOpenConns(10) // WAL mode supports multiple readers
+		db.SetMaxIdleConns(2)
+		db.SetConnMaxLifetime(0)             // Connections never expire
+		db.SetConnMaxIdleTime(5 * 60 * 1000) // Close idle connections after 5 minutes
 
-		log.Println("SQLite database connected successfully")
+		log.Println("SQLite database connected successfully with WAL mode")
 
 		// Create tables
 		if err := createSQLiteTables(); err != nil {
@@ -118,8 +123,11 @@ func InitDBSQLite() error {
 	sqlitePath := getEnv("SQLITE_PATH", "game.db")
 	log.Printf("Falling back to SQLite database: %s", sqlitePath)
 
+	// Enable WAL mode for better concurrency
+	sqlitePathWithWAL := fmt.Sprintf("file:%s?_journal_mode=WAL&_timeout=5000&_synchronous=NORMAL", sqlitePath)
+
 	var err error
-	db, err = sql.Open("sqlite3", sqlitePath)
+	db, err = sql.Open("sqlite3", sqlitePathWithWAL)
 	if err != nil {
 		return fmt.Errorf("failed to open sqlite database: %w", err)
 	}
@@ -129,11 +137,13 @@ func InitDBSQLite() error {
 		return fmt.Errorf("failed to ping sqlite database: %w", err)
 	}
 
-	// Set connection pool settings
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// Set connection pool settings - allow multiple connections with WAL mode
+	db.SetMaxOpenConns(10) // WAL mode supports multiple readers
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(0)             // Connections never expire
+	db.SetConnMaxIdleTime(5 * 60 * 1000) // Close idle connections after 5 minutes
 
-	log.Println("SQLite database connected successfully")
+	log.Println("SQLite database connected successfully with WAL mode")
 
 	// Create tables
 	if err := createSQLiteTables(); err != nil {

@@ -16,6 +16,7 @@ import {
   useCallDealer,
   useDiscardBottomCards,
   useCallFriend,
+  useJoinGame,
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
@@ -29,7 +30,7 @@ export default function GameTable() {
   const gameId = id ?? '';
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
   const { selectedCardIndices, clearSelection } = useGameStore();
   const isSinglePlayerRoute = location.pathname.startsWith('/game/singleplayer/');
 
@@ -41,7 +42,9 @@ export default function GameTable() {
   const callFriendMutation = useCallFriend(gameId);
   const startGameMutation = useStartGame();
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
+  const joinGameMutation = useJoinGame();
   const hasTriggeredAutoStartRef = useRef(false);
+  const hasAttemptedJoinRef = useRef(false);
   const game = data?.game;
 
   // DEBUG: Log game data
@@ -82,6 +85,37 @@ export default function GameTable() {
       setShowCallFriendDialog(false);
     }
   }, [game?.status]);
+
+  // 自动加入游戏（如果尚未加入）
+  useEffect(() => {
+    if (!game) return;
+    if (isSinglePlayerRoute) return; // 单人模式不需要加入
+    if (hasAttemptedJoinRef.current) return;
+    if (!user?.id) return;
+
+    // 检查当前用户是否已经在游戏中
+    const isInGame = game.players?.some(p => p.userId === user.id);
+    if (!isInGame && game.status === EGameStatus.WAITING) {
+      console.log('自动加入游戏');
+      hasAttemptedJoinRef.current = true;
+      joinGameMutation.mutate(gameId);
+    }
+  }, [game?.players, game?.status, gameId, user?.id, isSinglePlayerRoute]);
+
+  // 5人自动开始游戏
+  useEffect(() => {
+    if (!game) return;
+    // 只有在等待状态且玩家数量达到5人时才自动开始
+    if (game.status === EGameStatus.WAITING && game.players && game.players.length >= 5) {
+      // 检查是否是房主，只有房主可以开始游戏
+      const gameInfo = data as unknown as { game?: { hostId?: string } };
+      const hostId = gameInfo?.game?.hostId;
+      if (hostId && user?.id === hostId && !startGameMutation.isPending) {
+        console.log('5人已满，自动开始游戏');
+        startGameMutation.mutate(gameId);
+      }
+    }
+  }, [game?.players?.length, game?.status, gameId]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!gameId) return <Navigate to="/game" replace />;
@@ -260,19 +294,49 @@ export default function GameTable() {
 
         {/* 游戏控制按钮 */}
         <div className="mt-3 rounded-lg border-2 border-amber-500/30 bg-gradient-to-r from-amber-950/20 via-amber-900/20 to-amber-950/20 p-4 shadow-lg">
-          <div className="flex items-center justify-center gap-3">
-            {game.status === EGameStatus.WAITING && (
-              <Button
-                variant="game"
-                size="lg"
-                className="gap-2 text-base font-bold"
-                onClick={() => startGameMutation.mutate(gameId)}
-                disabled={startGameMutation.isPending}
-              >
-                <Play className="h-5 w-5" />
-                开始游戏
-              </Button>
-            )}
+          {game.status === EGameStatus.WAITING && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <p className="text-sm text-amber-200/80">
+                  等待玩家加入... ({game.players?.length || 0}/5)
+                </p>
+                <div className="mt-2 flex flex-wrap justify-center gap-2">
+                  {game.players?.map((player) => (
+                    <div
+                      key={player.id}
+                      className="rounded-full bg-amber-900/40 px-3 py-1 text-sm text-amber-100"
+                    >
+                      {player.username}
+                      {player.userId === user?.id && ' (你)'}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {(game.players?.length || 0) >= 5 && (
+                <Button
+                  variant="game"
+                  size="lg"
+                  className="gap-2 text-base font-bold"
+                  onClick={() => startGameMutation.mutate(gameId)}
+                  disabled={startGameMutation.isPending}
+                >
+                  {startGameMutation.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Play className="h-5 w-5" />
+                      5人已满，开始游戏
+                    </>
+                  )}
+                </Button>
+              )}
+              {(game.players?.length || 0) < 5 && (
+                <p className="text-xs text-amber-200/60">
+                  需要5人才能开始游戏
+                </p>
+              )}
+            </div>
+          )}
             {game.status === EGameStatus.CALLING && !showCallDialog && (
               <Button
                 variant="game"

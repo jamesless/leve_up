@@ -67,6 +67,7 @@ func main() {
 		protected.Use(middleware.AuthMiddleware())
 		{
 			protected.GET("/user", handlers.GetCurrentUser)
+			protected.GET("/games", handlers.ListGames)
 			protected.POST("/game/create", handlers.CreateGame)
 			protected.POST("/game/singleplayer", handlers.CreateSinglePlayerGame)
 			protected.GET("/game/:id", handlers.GetGame)
