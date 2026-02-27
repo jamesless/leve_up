@@ -11,9 +11,15 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
+
 	// Initialize database
 	if err := models.InitDB(); err != nil {
 		log.Fatal("Failed to initialize database:", err)

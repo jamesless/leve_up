@@ -1,6 +1,0 @@
-[GET] http://localhost:8080/ => [200] OK
-[GET] http://localhost:8080/static/css/style.css => [200] OK
-[GET] http://localhost:8080/static/js/app.js => [200] OK
-[GET] http://localhost:8080/register => [200] OK
-[GET] http://localhost:8080/static/css/style.css => [200] OK
-[POST] http://localhost:8080/api/register => [500] Internal Server Error

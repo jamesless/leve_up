@@ -677,21 +677,18 @@ func getCardValue(card Card, leadSuit, trumpSuit string) int {
 // 规则：所有花色的5、10、K都是分值牌（总分300分）
 func isScoringCard(card Card) bool {
 	// 所有花色的5、10、K都是分值牌
-	if card.Value == "5" || card.Value == "10" || card.Value == "K" {
-		return true
-	}
-	return false
+	return card.Value == "5" || card.Value == "10" || card.Value == "K"
 }
 
 // getCardPoints returns the point value of a scoring card
-// 规则：所有花色5=5分，10=10分，K=10分（3副牌总分300分）
+// 规则：所有花色的5=5分，10=10分，K=10分（3副牌共300分）
 func getCardPoints(card Card) int {
 	// 所有花色的5、10、K都是分值牌
 	if card.Value == "5" {
-		return 5 // 5 = 5分
+		return 5 // 5 = 5分，三副牌共60分 (4花色 × 3副 × 5分)
 	}
 	if card.Value == "10" || card.Value == "K" {
-		return 10 // 10, K = 10分
+		return 10 // 10和K = 10分，三副牌各120分 (4花色 × 3副 × 10分)
 	}
 	return 0
 }
@@ -790,20 +787,31 @@ func CreateSinglePlayerGame(name, hostID string) (*GameState, error) {
 
 	// Add AI players for seats 2-5
 	// Use simpler AI IDs that are consistent across games
-	aiPlayers := []string{"ai_2", "ai_3", "ai_4", "ai_5"}
-	for i, aiID := range aiPlayers {
-		// First, ensure AI user exists in users table (for foreign key)
-		// Use username that matches the ID to ensure uniqueness
-		_, err = db.Exec(`INSERT INTO users (id, username, password, level, wins, losses) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING`,
-			aiID, aiID, "ai", "2", 0, 0)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create AI user %s: %w", aiID, err)
+	// Create AI players - reuse existing AI users or create new ones
+	for i := 0; i < 4; i++ {
+		aiUsername := fmt.Sprintf("AI-%d", i+2)
+		seatNumber := i + 2
+
+		// First, check if AI user already exists by username
+		var aiID string
+		err = db.QueryRow(`SELECT id FROM users WHERE username = $1`, aiUsername).Scan(&aiID)
+		if err == sql.ErrNoRows {
+			// AI user doesn't exist, create new one
+			aiID = fmt.Sprintf("ai-%d", i+2)
+			_, err = db.Exec(`INSERT INTO users (id, username, password, level, wins, losses) VALUES ($1, $2, $3, $4, $5, $6)`,
+				aiID, aiUsername, "ai", "2", 0, 0)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create AI user for seat %d: %w", seatNumber, err)
+			}
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to query AI user for seat %d: %w", seatNumber, err)
 		}
+		// If no error, aiID now contains the existing user's ID
 
 		// Then add to game_players
-		_, err = db.Exec(`INSERT INTO game_players (game_id, user_id, seat_number) VALUES ($1, $2, $3)`, id, aiID, i+2)
+		_, err = db.Exec(`INSERT INTO game_players (game_id, user_id, seat_number) VALUES ($1, $2, $3)`, id, aiID, seatNumber)
 		if err != nil {
-			return nil, fmt.Errorf("failed to add AI player %s to game: %w", aiID, err)
+			return nil, fmt.Errorf("failed to add AI player to seat %d: %w", seatNumber, err)
 		}
 	}
 
@@ -1321,6 +1329,22 @@ type GameResult struct {
 }
 
 // PlayCardsGame plays multiple cards from a player's hand
+// isTrickComplete checks if all 5 players have played in the current trick
+func isTrickComplete(currentTrick []PlayedCard) bool {
+	if len(currentTrick) == 0 {
+		return false
+	}
+
+	// Count unique seats that have played
+	seatsPlayed := make(map[int]bool)
+	for _, pc := range currentTrick {
+		seatsPlayed[pc.Seat] = true
+	}
+
+	// Trick is complete when all 5 players have played
+	return len(seatsPlayed) == 5
+}
+
 func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
@@ -1396,12 +1420,24 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		return nil, err
 	}
 
-	// Check for friend reveal with first card
+	// Check for friend reveal with played cards
+	// 追踪打出次数，当打出第N张时识别盟友
 	if !table.FriendRevealed && table.HostCalledCard != nil && len(cardsToPlay) > 0 {
-		if cardsToPlay[0].Suit == table.HostCalledCard.Suit && cardsToPlay[0].Value == table.HostCalledCard.Value {
-			table.FriendRevealed = true
-			table.FriendSeat = playerSeat
-			hand.IsFriend = true
+		// 检查是否有叫的牌被打出
+		for _, card := range cardsToPlay {
+			if card.Suit == table.HostCalledCard.Suit && card.Value == table.HostCalledCard.Value {
+				// 打出了叫的牌，计数器+1
+				table.HostCalledCard.Count++
+
+				// 检查是否达到指定的position
+				if table.HostCalledCard.Count == table.HostCalledCard.Position {
+					// 第N张被打出，识别盟友
+					table.FriendRevealed = true
+					table.FriendSeat = playerSeat
+					hand.IsFriend = true
+					break // 找到盟友后跳出循环
+				}
+			}
 		}
 	}
 
@@ -1462,8 +1498,8 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		Message: fmt.Sprintf("Played %d cards", len(cardsToPlay)),
 	}
 
-	// Check if trick is complete (5 cards played - considering pairs/triples count as one play)
-	if len(table.CurrentTrick) >= 5 {
+	// Check if trick is complete (all 5 players have played)
+	if isTrickComplete(table.CurrentTrick) {
 		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
@@ -2179,15 +2215,23 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 			return nil // 拖拉机配拖拉机
 		}
 
-		// 2. 相同花色的对子（如果领出的是对子或三张）
-		if (isLeadPair || isLeadTriple) && !isPlayerPair && !isPlayerTriple {
-			// 检查是否有相同花色的对子
+		// 2. 当领出三张时，允许对子+单张的形式
+		if isLeadTriple && !isPlayerTriple {
+			// 如果玩家打出的牌包含对子，这是合法的"对子+单张"形式
+			if hasPairInSuit(cards, leadSuit) {
+				return nil // 对子+单张是合法的跟牌形式
+			}
+		}
+
+		// 3. 当领出对子时，如果玩家打出的不是对子，检查是否有对子必须跟
+		if isLeadPair && !isPlayerPair {
+			// 检查玩家打出的牌中是否有对子
 			if hasPairInSuit(cards, leadSuit) {
 				return fmt.Errorf("有相同花色的对子，必须跟对子")
 			}
 		}
 
-		// 3. 相同花色的单张
+		// 4. 相同花色的单张
 		return validateSingleSuitFollow(cards, leadSuit)
 	}
 

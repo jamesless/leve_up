@@ -71,11 +71,22 @@ export default {
           from: { opacity: '0', transform: 'translateY(-40px) rotateX(20deg)' },
           to: { opacity: '1', transform: 'translateY(0) rotateX(0)' },
         },
+        'pulse-glow': {
+          '0%, 100%': {
+            boxShadow: '0 0 20px rgba(251, 191, 36, 0.4), 0 0 40px rgba(251, 191, 36, 0.2)',
+            transform: 'scale(1)',
+          },
+          '50%': {
+            boxShadow: '0 0 30px rgba(251, 191, 36, 0.6), 0 0 60px rgba(251, 191, 36, 0.3)',
+            transform: 'scale(1.02)',
+          },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.4s ease-out',
         'slide-up': 'slide-up 0.5s ease-out',
         'card-deal': 'card-deal 0.3s ease-out',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
       },
     },
   },

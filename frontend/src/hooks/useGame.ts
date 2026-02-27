@@ -146,3 +146,15 @@ export function useDiscardBottomCards(gameId: string) {
     },
   });
 }
+
+export function useCallFriend(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { suit: string; value: string; position: number }) =>
+      gameService.callFriend(gameId, params.suit, params.value, params.position),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
+  });
+}

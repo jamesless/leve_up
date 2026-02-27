@@ -23,7 +23,13 @@ leve_up/
 │   │   ├── store/
 │   │   └── types/
 │   └── ...config files
-└── RULE.md           # 详细游戏规则文档
+├── test/             # 测试文件和测试报告
+├── problem/          # 问题报告和修复记录
+├── docs/             # 项目文档
+├── browser_test/     # 浏览器自动化测试
+├── scripts/          # 项目脚本
+├── RULE.md           # 详细游戏规则文档
+└── AGENTS.md         # 开发规范
 ```
 
 ## 详细规则说明

@@ -2,8 +2,9 @@ import type { ICard, ECardSuit } from './card';
 
 export enum EGameStatus {
   WAITING = 'waiting',
-  CALLING = 'calling',      // 叫庄阶段
-  DISCARDING = 'discarding', // 扣牌阶段
+  CALLING = 'calling',           // 叫庄阶段
+  CALLING_FRIEND = 'calling_friend', // 叫朋友阶段
+  DISCARDING = 'discarding',     // 扣牌阶段
   PLAYING = 'playing',
   FINISHED = 'finished',
 }

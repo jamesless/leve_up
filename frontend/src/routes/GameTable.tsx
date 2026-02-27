@@ -6,6 +6,7 @@ import PlayerHand from '@/components/game/PlayerHand';
 import PlayerSeat from '@/components/game/PlayerSeat';
 import CallDealerDialog from '@/components/game/CallDealerDialog';
 import DiscardDialog from '@/components/game/DiscardDialog';
+import CallFriendDialog from '@/components/game/CallFriendDialog';
 import {
   useGameTable,
   usePlayCards,
@@ -14,6 +15,7 @@ import {
   useStartSinglePlayerGame,
   useCallDealer,
   useDiscardBottomCards,
+  useCallFriend,
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
@@ -36,12 +38,26 @@ export default function GameTable() {
   const aiPlay = useAiPlay(gameId);
   const callDealerMutation = useCallDealer(gameId);
   const discardMutation = useDiscardBottomCards(gameId);
+  const callFriendMutation = useCallFriend(gameId);
   const startGameMutation = useStartGame();
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
   const hasTriggeredAutoStartRef = useRef(false);
   const game = data?.game;
+
+  // DEBUG: Log game data
+  useEffect(() => {
+    if (game) {
+      console.log('=== GAME DATA DEBUG ===');
+      console.log('Total players:', game.players?.length);
+      console.log('Players:', game.players);
+      console.log('My position:', game.myPosition);
+      console.log('=======================');
+    }
+  }, [game]);
+
   const [showCallDialog, setShowCallDialog] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
 
   useEffect(() => {
     if (!isSinglePlayerRoute || hasTriggeredAutoStartRef.current) return;
@@ -49,7 +65,23 @@ export default function GameTable() {
     if (game.status !== EGameStatus.WAITING) return;
     hasTriggeredAutoStartRef.current = true;
     startSinglePlayerMutation.mutate();
-  }, [game?.status, isSinglePlayerRoute, startSinglePlayerMutation, game]);
+  }, [game?.status, game?.id, isSinglePlayerRoute, startSinglePlayerMutation.mutate]);
+
+  // 自动显示叫庄或扣牌或叫朋友对话框
+  useEffect(() => {
+    if (!game) return;
+    if (game.status === EGameStatus.CALLING) {
+      setShowCallDialog(true);
+    } else if (game.status === EGameStatus.DISCARDING) {
+      setShowDiscardDialog(true);
+    } else if (game.status === EGameStatus.CALLING_FRIEND) {
+      setShowCallFriendDialog(true);
+    } else {
+      setShowCallDialog(false);
+      setShowDiscardDialog(false);
+      setShowCallFriendDialog(false);
+    }
+  }, [game?.status]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!gameId) return <Navigate to="/game" replace />;
@@ -73,7 +105,7 @@ export default function GameTable() {
     );
   }
 
-  const otherPlayers = game.players.filter((_, i) => i !== game.myPosition);
+  const otherPlayers = game.players.filter(player => player.position !== game.myPosition);
 
   const handlePlay = () => {
     if (selectedCardIndices.size === 0) return;
@@ -103,18 +135,14 @@ export default function GameTable() {
     );
   };
 
-  // 自动显示叫庄或扣牌对话框
-  useEffect(() => {
-    if (!game) return;
-    if (game.status === EGameStatus.CALLING && !showCallDialog) {
-      setShowCallDialog(true);
-    } else if (game.status === EGameStatus.DISCARDING && !showDiscardDialog) {
-      setShowDiscardDialog(true);
-    } else {
-      setShowCallDialog(false);
-      setShowDiscardDialog(false);
-    }
-  }, [game?.status]);
+  const handleCallFriend = (suit: ECardSuit, value: string, position: number) => {
+    callFriendMutation.mutate(
+      { suit, value, position },
+      { onSuccess: () => {
+        setShowCallFriendDialog(false);
+      }},
+    );
+  };
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col">
@@ -138,11 +166,13 @@ export default function GameTable() {
               ? '等待中'
               : game.status === EGameStatus.CALLING
                 ? '叫庄中'
-                : game.status === EGameStatus.DISCARDING
-                  ? '扣牌中'
-                  : game.status === EGameStatus.PLAYING
-                    ? '进行中'
-                    : '已结束'}
+                : game.status === EGameStatus.CALLING_FRIEND
+                  ? '叫朋友中'
+                  : game.status === EGameStatus.DISCARDING
+                    ? '扣牌中'
+                    : game.status === EGameStatus.PLAYING
+                      ? '进行中'
+                      : '已结束'}
           </Badge>
           {game.currentLevel && (
             <Badge variant="outline" className="gap-1">
@@ -219,62 +249,93 @@ export default function GameTable() {
           </div>
         )}
 
+        {/* 叫朋友对话框 */}
+        {showCallFriendDialog && (
+          <CallFriendDialog
+            onSubmit={handleCallFriend}
+            isPending={callFriendMutation.isPending}
+            currentLevel={game.currentLevel}
+          />
+        )}
+
         {/* 游戏控制按钮 */}
-        <div className="mt-3 flex items-center justify-center gap-2">
-          {game.status === EGameStatus.WAITING && (
-            <Button
-              variant="game"
-              className="gap-2"
-              onClick={() => startGameMutation.mutate(gameId)}
-              disabled={startGameMutation.isPending}
-            >
-              <Play className="h-4 w-4" />
-              开始游戏
-            </Button>
-          )}
-          {game.status === EGameStatus.CALLING && !showCallDialog && (
-            <Button
-              variant="game"
-              className="gap-2"
-              onClick={() => setShowCallDialog(true)}
-            >
-              叫庄
-            </Button>
-          )}
-          {game.status === EGameStatus.DISCARDING && !showDiscardDialog && (
-            <Button
-              variant="game"
-              className="gap-2"
-              onClick={() => setShowDiscardDialog(true)}
-            >
-              扣牌
-            </Button>
-          )}
-          {game.status === EGameStatus.PLAYING && (
-            <>
+        <div className="mt-3 rounded-lg border-2 border-amber-500/30 bg-gradient-to-r from-amber-950/20 via-amber-900/20 to-amber-950/20 p-4 shadow-lg">
+          <div className="flex items-center justify-center gap-3">
+            {game.status === EGameStatus.WAITING && (
               <Button
                 variant="game"
-                className="gap-2"
-                onClick={handlePlay}
-                disabled={selectedCardIndices.size === 0 || playCards.isPending}
+                size="lg"
+                className="gap-2 text-base font-bold"
+                onClick={() => startGameMutation.mutate(gameId)}
+                disabled={startGameMutation.isPending}
               >
-                {playCards.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                出牌 ({selectedCardIndices.size})
+                <Play className="h-5 w-5" />
+                开始游戏
               </Button>
-              <Button variant="outline" className="gap-2" onClick={clearSelection}>
-                <SkipForward className="h-4 w-4" />
-                不出
-              </Button>
+            )}
+            {game.status === EGameStatus.CALLING && !showCallDialog && (
               <Button
-                variant="secondary"
-                className="gap-2"
-                onClick={() => aiPlay.mutate()}
-                disabled={aiPlay.isPending}
+                variant="game"
+                size="lg"
+                className="gap-2 text-base font-bold"
+                onClick={() => setShowCallDialog(true)}
               >
-                {aiPlay.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                AI 出牌
+                叫庄
               </Button>
-            </>
+            )}
+            {game.status === EGameStatus.DISCARDING && !showDiscardDialog && (
+              <Button
+                variant="game"
+                size="lg"
+                className="gap-2 text-base font-bold"
+                onClick={() => setShowDiscardDialog(true)}
+              >
+                扣牌
+              </Button>
+            )}
+            {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
+              <Button
+                variant="game"
+                size="lg"
+                className="gap-2 text-base font-bold"
+                onClick={() => setShowCallFriendDialog(true)}
+              >
+                叫朋友
+              </Button>
+            )}
+            {game.status === EGameStatus.PLAYING && (
+              <>
+                <Button
+                  variant="game"
+                  size="lg"
+                  className="gap-2 text-base font-bold"
+                  onClick={handlePlay}
+                  disabled={selectedCardIndices.size === 0 || playCards.isPending}
+                >
+                  {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+                  出牌 ({selectedCardIndices.size})
+                </Button>
+                <Button variant="outline" size="lg" className="gap-2 text-base" onClick={clearSelection}>
+                  <SkipForward className="h-5 w-5" />
+                  不出
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  className="gap-2 text-base"
+                  onClick={() => aiPlay.mutate()}
+                  disabled={aiPlay.isPending}
+                >
+                  {aiPlay.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bot className="h-5 w-5" />}
+                  AI 出牌
+                </Button>
+              </>
+            )}
+          </div>
+          {selectedCardIndices.size > 0 && game.status === EGameStatus.PLAYING && (
+            <p className="mt-2 text-center text-sm text-amber-400">
+              已选择 {selectedCardIndices.size} 张牌，点击"出牌"按钮进行出牌
+            </p>
           )}
         </div>
         {playCards.isError && (
@@ -285,6 +346,9 @@ export default function GameTable() {
         )}
         {discardMutation.isError && (
           <p className="mt-2 text-center text-sm text-destructive">{discardMutation.error.message}</p>
+        )}
+        {callFriendMutation.isError && (
+          <p className="mt-2 text-center text-sm text-destructive">{callFriendMutation.error.message}</p>
         )}
       </div>
     </div>
