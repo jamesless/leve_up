@@ -20,20 +20,129 @@ type CardStrength struct {
 	IsLead   bool
 }
 
+// isTrumpCard checks if a card is a trump card
+// Trump cards include: trump suit cards, rank cards (e.g. all 2s), and jokers
+func isTrumpCard(card Card, trumpSuit string, trumpRank string) bool {
+	// Jokers are always trump
+	if card.Type == "joker" {
+		return true
+	}
+	// Rank cards are trump (e.g. if playing 2, all 2s are trump)
+	if card.Value == trumpRank {
+		return true
+	}
+	// Trump suit cards are trump
+	if card.Suit == trumpSuit {
+		return true
+	}
+	return false
+}
+
+// isSameSuitForFollow checks if a card can follow the lead card
+// In upgrade game, if lead is trump, all trump cards can follow
+// If lead is non-trump, only same suit cards can follow
+func isSameSuitForFollow(card Card, leadCard Card, trumpSuit string, trumpRank string) bool {
+	leadIsTrump := isTrumpCard(leadCard, trumpSuit, trumpRank)
+	cardIsTrump := isTrumpCard(card, trumpSuit, trumpRank)
+
+	if leadIsTrump {
+		// If lead is trump, card must be trump to follow
+		return cardIsTrump
+	} else {
+		// If lead is not trump, card must have same suit (and not be trump)
+		return card.Suit == leadCard.Suit && !cardIsTrump
+	}
+}
+
 // DecidePlay decides which cards to play based on current game state
 // Returns slice of card indices (can be multiple for pairs, triples, etc.)
 func (ai *AIPlayer) DecidePlay(table *GameTable) []int {
 	if len(ai.Hand) == 0 {
+		return []int{}
+	}
+
+	// Single card left - play it
+	if len(ai.Hand) == 1 {
 		return []int{0}
 	}
 
+	var result []int
+
 	// If leading (first to play in this trick)
 	if len(table.CurrentTrick) == 0 {
-		return ai.decideLeadCards(table)
+		result = ai.decideLeadCards(table)
+	} else {
+		// If following, must follow suit if possible
+		result = ai.decideFollowCards(table)
 	}
 
-	// If following, must follow suit if possible
-	return ai.decideFollowCards(table)
+	// Safety check: ensure result is valid
+	if len(result) == 0 {
+		// Emergency fallback - play lowest card
+		return []int{ai.findLowestCard()}
+	}
+
+	// Validate indices
+	for i, idx := range result {
+		if idx < 0 || idx >= len(ai.Hand) {
+			// Invalid index detected - use fallback
+			fmt.Printf("WARNING: AI generated invalid card index %d (hand size: %d)\n", idx, len(ai.Hand))
+			return []int{ai.findLowestCard()}
+		}
+		// Check for duplicates
+		for j := i + 1; j < len(result); j++ {
+			if result[j] == idx {
+				fmt.Printf("WARNING: AI generated duplicate card index %d\n", idx)
+				// Remove duplicate
+				result = append(result[:j], result[j+1:]...)
+				j--
+			}
+		}
+	}
+
+	// CRITICAL: Validate that selected cards form a valid card pattern
+	// For pairs/triples, all cards must have same value and same suit
+	if len(result) >= 2 {
+		firstCard := ai.Hand[result[0]]
+		allSame := true
+		for _, idx := range result[1:] {
+			card := ai.Hand[idx]
+			if card.Value != firstCard.Value || card.Suit != firstCard.Suit {
+				allSame = false
+				break
+			}
+		}
+		if !allSame && len(table.CurrentTrick) == 0 {
+			// When leading, if cards don't form a valid pair/triple, just play one card
+			fmt.Printf("WARNING: AI selected cards that don't form valid pair/triple, falling back to single card\n")
+			return []int{result[0]}
+		}
+	}
+
+	// If following, ensure we have the right number of cards
+	if len(table.CurrentTrick) > 0 {
+		leadSeat := table.CurrentTrick[0].Seat
+		leadCount := 0
+		for _, pc := range table.CurrentTrick {
+			if pc.Seat == leadSeat {
+				leadCount++
+			} else {
+				break
+			}
+		}
+
+		if len(result) != leadCount {
+			fmt.Printf("WARNING: AI returned %d cards but should return %d cards\n", len(result), leadCount)
+			// If we have too many cards, remove extras
+			if len(result) > leadCount {
+				result = result[:leadCount]
+			}
+			// If we have too few cards, it means we don't have enough of the correct suit
+			// Just return what we have - the game validation will handle this
+		}
+	}
+
+	return result
 }
 
 // decideLeadCards chooses cards when leading a trick
@@ -166,8 +275,10 @@ func (ai *AIPlayer) tryThrowCards(table *GameTable) []int {
 // decideFollowCards chooses cards when following a lead
 // Must respect the lead card type (pair, triple, etc.)
 func (ai *AIPlayer) decideFollowCards(table *GameTable) []int {
-	leadSuit := table.CurrentTrick[0].Card.Suit
+	leadCard := table.CurrentTrick[0].Card
+	leadSuit := leadCard.Suit
 	trumpSuit := table.TrumpSuit
+	trumpRank := table.TrumpRank
 
 	// Count how many cards the leader played
 	leadSeat := table.CurrentTrick[0].Seat
@@ -185,17 +296,26 @@ func (ai *AIPlayer) decideFollowCards(table *GameTable) []int {
 	isLeadPair := leadCount == 2 && leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit
 	isLeadTriple := leadCount == 3 && leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value && leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit
 
-	// Find cards that can follow the lead suit
+	// Check if lead card is trump
+	leadIsTrump := isTrumpCard(leadCard, trumpSuit, trumpRank)
+
+	// Find cards that can follow the lead
 	var followCards []int
 	for i, card := range ai.Hand {
-		if card.Suit == leadSuit {
+		if isSameSuitForFollow(card, leadCard, trumpSuit, trumpRank) {
 			followCards = append(followCards, i)
 		}
 	}
 
 	// If we can follow suit
 	if len(followCards) > 0 {
-		return ai.decideFollowWithSuit(table, followCards, leadCount, isLeadPair, isLeadTriple, leadSuit)
+		// Determine the effective suit for finding pairs/triples
+		effectiveSuit := leadSuit
+		if leadIsTrump {
+			// For trump, we need to consider all trump cards
+			effectiveSuit = trumpSuit
+		}
+		return ai.decideFollowWithSuit(table, followCards, leadCount, isLeadPair, isLeadTriple, effectiveSuit)
 	}
 
 	// Can't follow suit - decide to trump or discard
@@ -210,6 +330,18 @@ func (ai *AIPlayer) decideFollowWithSuit(table *GameTable, followCards []int, le
 		if pairIndices := ai.findPairInSuit(leadSuit); len(pairIndices) >= 2 {
 			return pairIndices[:2]
 		}
+		// Cannot match pair type - must play 2 lowest cards of lead suit
+		if len(followCards) >= 2 {
+			sort.Slice(followCards, func(i, j int) bool {
+				return getCardBaseValue(ai.Hand[followCards[i]]) < getCardBaseValue(ai.Hand[followCards[j]])
+			})
+			return followCards[:2]
+		}
+		// Not enough cards of lead suit for a pair - play what we have and fill with other cards
+		// This should not happen if validation is correct, but handle it as safety
+		if len(followCards) == 1 {
+			return followCards
+		}
 	}
 
 	if isLeadTriple {
@@ -217,43 +349,34 @@ func (ai *AIPlayer) decideFollowWithSuit(table *GameTable, followCards []int, le
 		if tripleIndices := ai.findTripleInSuit(leadSuit); len(tripleIndices) >= 3 {
 			return tripleIndices[:3]
 		}
+		// Cannot match triple type - must play 3 lowest cards of lead suit
+		if len(followCards) >= 3 {
+			sort.Slice(followCards, func(i, j int) bool {
+				return getCardBaseValue(ai.Hand[followCards[i]]) < getCardBaseValue(ai.Hand[followCards[j]])
+			})
+			return followCards[:3]
+		}
+		// Not enough cards of lead suit for a triple - play what we have
+		if len(followCards) > 0 {
+			return followCards
+		}
 	}
 
 	// Can't match the exact type, play leadCount cards from the suit
-	// Sort follow cards by strength
-	strengths := make([]struct {
-		index    int
-		strength int
-	}, len(followCards))
-
-	for i, cardIdx := range followCards {
-		card := ai.Hand[cardIdx]
-		strength := getCardValue(card, leadSuit, table.TrumpSuit)
-		strengths[i] = struct {
-			index    int
-			strength int
-		}{cardIdx, strength}
+	// If we have enough cards in the suit, use them
+	if len(followCards) >= leadCount {
+		// Sort follow cards by strength (ascending - play lowest)
+		sort.Slice(followCards, func(i, j int) bool {
+			return getCardBaseValue(ai.Hand[followCards[i]]) < getCardBaseValue(ai.Hand[followCards[j]])
+		})
+		return followCards[:leadCount]
 	}
 
-	// Sort by strength (ascending)
-	sort.Slice(strengths, func(i, j int) bool {
-		return strengths[i].strength < strengths[j].strength
-	})
-
-	// Select leadCount cards
-	selectedIndices := make([]int, 0, leadCount)
-	for i := 0; i < leadCount && i < len(strengths); i++ {
-		selectedIndices = append(selectedIndices, strengths[i].index)
-	}
-
-	// If we don't have enough cards in the suit, add more cards from other suits
-	if len(selectedIndices) < leadCount {
-		// Need to add more cards from other suits
-		otherCards := ai.findLowestNonSuitCards(leadSuit, leadCount-len(selectedIndices))
-		selectedIndices = append(selectedIndices, otherCards...)
-	}
-
-	return selectedIndices
+	// Not enough cards in the suit - this means we can't properly follow
+	// This should not happen if the validation is correct
+	// Return all cards we have of this suit as fallback
+	fmt.Printf("WARNING: AI has only %d cards of suit %s but needs %d cards\n", len(followCards), leadSuit, leadCount)
+	return followCards
 }
 
 // findPairInSuit finds a pair in the specified suit
@@ -308,10 +431,32 @@ func (ai *AIPlayer) findLowestNonSuitCards(excludeSuit string, count int) []int 
 		return getCardBaseValue(ai.Hand[candidates[i]]) < getCardBaseValue(ai.Hand[candidates[j]])
 	})
 
-	// Return lowest N cards
+	// Return lowest N cards (or all if not enough)
 	if len(candidates) > count {
-		candidates = candidates[:count]
+		return candidates[:count]
 	}
+
+	// If not enough non-suit cards, add some from the excluded suit
+	if len(candidates) < count {
+		for i, card := range ai.Hand {
+			if card.Suit == excludeSuit {
+				alreadyAdded := false
+				for _, idx := range candidates {
+					if idx == i {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					candidates = append(candidates, i)
+					if len(candidates) >= count {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	return candidates
 }
 
@@ -335,17 +480,35 @@ func (ai *AIPlayer) decideCantFollow(table *GameTable, leadSuit, trumpSuit strin
 			if trumpPair := ai.findPairInSuit(trumpSuit); len(trumpPair) >= 2 {
 				return trumpPair[:2]
 			}
+			// Cannot find trump pair - must play 2 lowest trump cards
+			if len(trumpCards) >= 2 {
+				sort.Slice(trumpCards, func(i, j int) bool {
+					return getCardBaseValue(ai.Hand[trumpCards[i]]) < getCardBaseValue(ai.Hand[trumpCards[j]])
+				})
+				return trumpCards[:2]
+			}
 		}
 		if isLeadTriple {
 			// Try to use a trump triple
 			if trumpTriple := ai.findTripleInSuit(trumpSuit); len(trumpTriple) >= 3 {
 				return trumpTriple[:3]
 			}
+			// Cannot find trump triple - must play 3 lowest trump cards
+			if len(trumpCards) >= 3 {
+				sort.Slice(trumpCards, func(i, j int) bool {
+					return getCardBaseValue(ai.Hand[trumpCards[i]]) < getCardBaseValue(ai.Hand[trumpCards[j]])
+				})
+				return trumpCards[:3]
+			}
 		}
 
-		// Can't match type, use lowest trumps
+		// Single card or other pattern - use lowest trumps
 		if len(trumpCards) >= leadCount {
-			return trumpCards[len(trumpCards)-leadCount:]
+			// Use lowest N trump cards
+			sort.Slice(trumpCards, func(i, j int) bool {
+				return getCardBaseValue(ai.Hand[trumpCards[i]]) < getCardBaseValue(ai.Hand[trumpCards[j]])
+			})
+			return trumpCards[:leadCount]
 		}
 
 		// Not enough trumps, mix trump and discard
@@ -355,6 +518,11 @@ func (ai *AIPlayer) decideCantFollow(table *GameTable, leadSuit, trumpSuit strin
 		if remaining > 0 {
 			discards := ai.findLowestNonTrumpCards(trumpSuit, remaining)
 			result = append(result, discards...)
+		}
+
+		// Safety check - ensure we have exactly leadCount cards
+		if len(result) < leadCount {
+			result = ai.ensureCardCount(result, leadCount, leadSuit, trumpSuit)
 		}
 		return result
 	}
@@ -377,10 +545,32 @@ func (ai *AIPlayer) findLowestNonTrumpCards(trumpSuit string, count int) []int {
 		return getCardBaseValue(ai.Hand[candidates[i]]) < getCardBaseValue(ai.Hand[candidates[j]])
 	})
 
-	// Return lowest N cards
+	// Return lowest N cards (or all if not enough)
 	if len(candidates) > count {
-		candidates = candidates[:count]
+		return candidates[:count]
 	}
+
+	// If not enough non-trump cards, add some trump cards as last resort
+	if len(candidates) < count {
+		for i, card := range ai.Hand {
+			if card.Suit == trumpSuit {
+				alreadyAdded := false
+				for _, idx := range candidates {
+					if idx == i {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					candidates = append(candidates, i)
+					if len(candidates) >= count {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	return candidates
 }
 
@@ -504,7 +694,7 @@ func (ai *AIPlayer) discardLow(table *GameTable, leadSuit string, count int) []i
 
 	suitCounts := make(map[string]int)
 	for _, card := range ai.Hand {
-		if card.Suit != table.TrumpSuit {
+		if card.Suit != table.TrumpSuit && card.Suit != leadSuit {
 			suitCounts[card.Suit]++
 		}
 	}
@@ -521,17 +711,28 @@ func (ai *AIPlayer) discardLow(table *GameTable, leadSuit string, count int) []i
 
 	// Get non-scoring cards from shortest suit
 	var candidates []int
-	for i, card := range ai.Hand {
-		if card.Suit == shortestSuit && !isScoringCard(card) {
-			candidates = append(candidates, i)
-		}
-	}
-
-	// If not enough, add scoring cards from shortest suit
-	if len(candidates) < count {
+	if shortestSuit != "" {
 		for i, card := range ai.Hand {
-			if card.Suit == shortestSuit && isScoringCard(card) {
+			if card.Suit == shortestSuit && !isScoringCard(card) {
 				candidates = append(candidates, i)
+			}
+		}
+
+		// If not enough, add scoring cards from shortest suit
+		if len(candidates) < count {
+			for i, card := range ai.Hand {
+				if card.Suit == shortestSuit && isScoringCard(card) {
+					alreadyAdded := false
+					for _, idx := range candidates {
+						if idx == i {
+							alreadyAdded = true
+							break
+						}
+					}
+					if !alreadyAdded {
+						candidates = append(candidates, i)
+					}
+				}
 			}
 		}
 	}
@@ -539,8 +740,54 @@ func (ai *AIPlayer) discardLow(table *GameTable, leadSuit string, count int) []i
 	// If still not enough, add from other non-trump suits
 	if len(candidates) < count {
 		for i, card := range ai.Hand {
-			if card.Suit != table.TrumpSuit && card.Suit != shortestSuit {
+			if card.Suit != table.TrumpSuit && card.Suit != leadSuit {
+				alreadyAdded := false
+				for _, idx := range candidates {
+					if idx == i {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					candidates = append(candidates, i)
+				}
+			}
+		}
+	}
+
+	// If still not enough, add any cards except trump (prefer to keep trump)
+	if len(candidates) < count {
+		for i, card := range ai.Hand {
+			if card.Suit != table.TrumpSuit {
+				alreadyAdded := false
+				for _, idx := range candidates {
+					if idx == i {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					candidates = append(candidates, i)
+				}
+			}
+		}
+	}
+
+	// Last resort: add trump cards if needed
+	if len(candidates) < count {
+		for i := range ai.Hand {
+			alreadyAdded := false
+			for _, idx := range candidates {
+				if idx == i {
+					alreadyAdded = true
+					break
+				}
+			}
+			if !alreadyAdded {
 				candidates = append(candidates, i)
+				if len(candidates) >= count {
+					break
+				}
 			}
 		}
 	}
@@ -550,28 +797,9 @@ func (ai *AIPlayer) discardLow(table *GameTable, leadSuit string, count int) []i
 		return getCardBaseValue(ai.Hand[candidates[i]]) < getCardBaseValue(ai.Hand[candidates[j]])
 	})
 
-	// Return count cards
+	// Return exactly count cards
 	if len(candidates) > count {
-		candidates = candidates[:count]
-	}
-
-	// If still not enough (edge case), add any remaining cards
-	if len(candidates) < count {
-		for i := range ai.Hand {
-			alreadySelected := false
-			for _, idx := range candidates {
-				if idx == i {
-					alreadySelected = true
-					break
-				}
-			}
-			if !alreadySelected {
-				candidates = append(candidates, i)
-				if len(candidates) >= count {
-					break
-				}
-			}
-		}
+		return candidates[:count]
 	}
 
 	return candidates
@@ -716,4 +944,79 @@ func AutoPlayAI(table *GameTable) error {
 	}
 
 	return nil
+}
+
+// ensureCardCount ensures that we have exactly count cards
+// This is a safety fallback to prevent AI from getting stuck
+func (ai *AIPlayer) ensureCardCount(currentCards []int, count int, excludeSuit string, trumpSuit string) []int {
+	if len(currentCards) >= count {
+		return currentCards[:count]
+	}
+
+	// Create a copy of current cards
+	result := make([]int, len(currentCards))
+	copy(result, currentCards)
+
+	// Find cards we haven't selected yet
+	selectedMap := make(map[int]bool)
+	for _, idx := range currentCards {
+		selectedMap[idx] = true
+	}
+
+	// Prioritize non-trump, non-scoring cards
+	type cardPriority struct {
+		index    int
+		priority int // Lower is better
+	}
+	var candidates []cardPriority
+
+	for i, card := range ai.Hand {
+		if selectedMap[i] {
+			continue
+		}
+
+		priority := 0
+		if card.Suit == trumpSuit {
+			priority += 1000 // Avoid trump
+		}
+		if isScoringCard(card) {
+			priority += 100 // Avoid scoring cards
+		}
+		priority += getCardBaseValue(card) // Prefer low cards
+
+		candidates = append(candidates, cardPriority{i, priority})
+	}
+
+	// Sort by priority (lowest first)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].priority < candidates[j].priority
+	})
+
+	// Add cards until we have enough
+	for i := 0; i < len(candidates) && len(result) < count; i++ {
+		result = append(result, candidates[i].index)
+	}
+
+	// Final safety: if still not enough (shouldn't happen), add any remaining cards
+	if len(result) < count {
+		for i := range ai.Hand {
+			if !selectedMap[i] {
+				alreadyAdded := false
+				for _, idx := range result {
+					if idx == i {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					result = append(result, i)
+					if len(result) >= count {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }

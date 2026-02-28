@@ -10,7 +10,7 @@ interface DiscardDialogProps {
 }
 
 export default function DiscardDialog({ bottomCards, onSubmit, isPending }: DiscardDialogProps) {
-  const { selectedCardIndices, toggleCard, clearSelection } = useGameStore();
+  const { selectedCardIndices, clearSelection } = useGameStore();
   const [showBottomCards, setShowBottomCards] = useState(false);
 
   const handleSubmit = () => {

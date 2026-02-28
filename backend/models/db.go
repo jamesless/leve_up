@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 var db *sql.DB
@@ -37,46 +36,8 @@ func getEnvInt(key string, defaultValue int) int {
 
 // InitDB initializes the database connection and creates tables
 func InitDB() error {
-	// Check if we should use SQLite
-	dbType := os.Getenv("DB_TYPE")
+	// Use PostgreSQL
 	databaseURL := os.Getenv("DATABASE_URL")
-
-	if dbType == "sqlite" || databaseURL != "" && (databaseURL[:5] == "file:" || databaseURL[:3] == "sqlite") {
-		// Use SQLite
-		sqlitePath := getEnv("SQLITE_PATH", "game.db")
-		log.Printf("Using SQLite database: %s", sqlitePath)
-
-		// Enable WAL mode for better concurrency
-		sqlitePathWithWAL := fmt.Sprintf("file:%s?_journal_mode=WAL&_timeout=5000&_synchronous=NORMAL", sqlitePath)
-
-		var err error
-		db, err = sql.Open("sqlite3", sqlitePathWithWAL)
-		if err != nil {
-			return fmt.Errorf("failed to open sqlite database: %w", err)
-		}
-
-		// Test connection
-		if err := db.Ping(); err != nil {
-			return fmt.Errorf("failed to ping sqlite database: %w", err)
-		}
-
-		// Set connection pool settings - allow multiple connections with WAL mode
-		db.SetMaxOpenConns(10) // WAL mode supports multiple readers
-		db.SetMaxIdleConns(2)
-		db.SetConnMaxLifetime(0)             // Connections never expire
-		db.SetConnMaxIdleTime(5 * 60 * 1000) // Close idle connections after 5 minutes
-
-		log.Println("SQLite database connected successfully with WAL mode")
-
-		// Create tables
-		if err := createSQLiteTables(); err != nil {
-			return fmt.Errorf("failed to create sqlite tables: %w", err)
-		}
-
-		return nil
-	}
-
-	// Use PostgreSQL (default)
 	psqlInfo := databaseURL
 
 	if psqlInfo == "" {
@@ -99,9 +60,7 @@ func InitDB() error {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		log.Println("PostgreSQL connection failed, trying SQLite...")
-		// Fallback to SQLite
-		return InitDBSQLite()
+		return fmt.Errorf("failed to connect to PostgreSQL database: %w", err)
 	}
 
 	// Set connection pool settings
@@ -113,41 +72,6 @@ func InitDB() error {
 	// Create tables
 	if err := createTables(); err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
-	}
-
-	return nil
-}
-
-// InitDBSQLite initializes SQLite database
-func InitDBSQLite() error {
-	sqlitePath := getEnv("SQLITE_PATH", "game.db")
-	log.Printf("Falling back to SQLite database: %s", sqlitePath)
-
-	// Enable WAL mode for better concurrency
-	sqlitePathWithWAL := fmt.Sprintf("file:%s?_journal_mode=WAL&_timeout=5000&_synchronous=NORMAL", sqlitePath)
-
-	var err error
-	db, err = sql.Open("sqlite3", sqlitePathWithWAL)
-	if err != nil {
-		return fmt.Errorf("failed to open sqlite database: %w", err)
-	}
-
-	// Test connection
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping sqlite database: %w", err)
-	}
-
-	// Set connection pool settings - allow multiple connections with WAL mode
-	db.SetMaxOpenConns(10) // WAL mode supports multiple readers
-	db.SetMaxIdleConns(2)
-	db.SetConnMaxLifetime(0)             // Connections never expire
-	db.SetConnMaxIdleTime(5 * 60 * 1000) // Close idle connections after 5 minutes
-
-	log.Println("SQLite database connected successfully with WAL mode")
-
-	// Create tables
-	if err := createSQLiteTables(); err != nil {
-		return fmt.Errorf("failed to create sqlite tables: %w", err)
 	}
 
 	return nil
@@ -280,130 +204,5 @@ func createTables() error {
 	}
 
 	log.Println("Database tables created/verified successfully")
-	return nil
-}
-
-// createSQLiteTables creates all necessary tables for SQLite
-func createSQLiteTables() error {
-	// Create users table
-	usersTable := `
-	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		username TEXT UNIQUE NOT NULL,
-		password TEXT NOT NULL,
-		level TEXT DEFAULT '2',
-		wins INTEGER DEFAULT 0,
-		losses INTEGER DEFAULT 0,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	)`
-
-	if _, err := db.Exec(usersTable); err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
-
-	// Create index on username
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`); err != nil {
-		log.Println("Warning: failed to create username index:", err)
-	}
-
-	// Create games table
-	gamesTable := `
-	CREATE TABLE IF NOT EXISTS games (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		host_id TEXT NOT NULL,
-		max_players INTEGER DEFAULT 5,
-		status TEXT DEFAULT 'waiting',
-		current_level TEXT DEFAULT '2',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (host_id) REFERENCES users(id) ON DELETE CASCADE
-	)`
-
-	if _, err := db.Exec(gamesTable); err != nil {
-		return fmt.Errorf("failed to create games table: %w", err)
-	}
-
-	// Create game_players table
-	gamePlayersTable := `
-	CREATE TABLE IF NOT EXISTS game_players (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		game_id TEXT NOT NULL,
-		user_id TEXT NOT NULL,
-		seat_number INTEGER DEFAULT 0,
-		joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
-		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-		UNIQUE (game_id, user_id)
-	)`
-
-	if _, err := db.Exec(gamePlayersTable); err != nil {
-		return fmt.Errorf("failed to create game_players table: %w", err)
-	}
-
-	// Create game_records table
-	gameRecordsTable := `
-	CREATE TABLE IF NOT EXISTS game_records (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		game_id TEXT NOT NULL,
-		user_id TEXT NOT NULL,
-		old_level TEXT NOT NULL,
-		new_level TEXT NOT NULL,
-		is_winner INTEGER DEFAULT 0,
-		score INTEGER DEFAULT 0,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
-		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-	)`
-
-	if _, err := db.Exec(gameRecordsTable); err != nil {
-		return fmt.Errorf("failed to create game_records table: %w", err)
-	}
-
-	// Create game_action_logs table
-	gameActionLogsTable := `
-	CREATE TABLE IF NOT EXISTS game_action_logs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		game_id TEXT NOT NULL,
-		action_type TEXT NOT NULL,
-		player_seat INTEGER NOT NULL,
-		player_id TEXT,
-		action_data TEXT NOT NULL,
-		result_data TEXT,
-		timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
-		FOREIGN KEY (player_id) REFERENCES users(id) ON DELETE SET NULL
-	)`
-
-	if _, err := db.Exec(gameActionLogsTable); err != nil {
-		return fmt.Errorf("failed to create game_action_logs table: %w", err)
-	}
-
-	// Create index
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_game_action_logs_game_id_timestamp ON game_action_logs(game_id, timestamp)`); err != nil {
-		log.Println("Warning: failed to create game_action_logs index:", err)
-	}
-
-	// Create game_replays table
-	gameReplaysTable := `
-	CREATE TABLE IF NOT EXISTS game_replays (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		game_id TEXT UNIQUE NOT NULL,
-		initial_state TEXT NOT NULL,
-		final_state TEXT NOT NULL,
-		total_actions INTEGER DEFAULT 0,
-		duration_seconds INTEGER DEFAULT 0,
-		winner_team TEXT,
-		final_score INTEGER DEFAULT 0,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
-	)`
-
-	if _, err := db.Exec(gameReplaysTable); err != nil {
-		return fmt.Errorf("failed to create game_replays table: %w", err)
-	}
-
-	log.Println("SQLite database tables created/verified successfully")
 	return nil
 }

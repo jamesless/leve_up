@@ -9,6 +9,9 @@ interface IPlayingCardProps {
   size?: 'sm' | 'md' | 'lg';
   faceDown?: boolean;
   className?: string;
+  isTrumpRank?: boolean; // 是否是级牌（叫庄阶段高亮）
+  isTrump?: boolean; // 是否是主牌（叫庄结束后高亮）
+  showTrumpLabel?: boolean; // 是否显示"主"标签
 }
 
 const SIZE_CLASSES = {
@@ -24,6 +27,9 @@ export default function PlayingCard({
   size = 'md',
   faceDown = false,
   className,
+  isTrumpRank = false,
+  isTrump = false,
+  showTrumpLabel = false,
 }: IPlayingCardProps) {
   if (faceDown) {
     return (
@@ -55,10 +61,20 @@ export default function PlayingCard({
         onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:translate-y-0',
         selected
           ? 'border-amber-400 -translate-y-2 shadow-amber-400/30 ring-2 ring-amber-400/50'
-          : 'border-slate-200',
+          : isTrumpRank
+            ? 'border-blue-400 ring-2 ring-blue-400/50 shadow-blue-400/30' // 级牌高亮（蓝色）
+            : isTrump
+              ? 'border-green-400 ring-2 ring-green-400/50 shadow-green-400/30' // 主牌高亮（绿色）
+              : 'border-slate-200',
         className,
       )}
     >
+      {/* 主牌标签 */}
+      {showTrumpLabel && (
+        <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded bg-green-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+          主
+        </div>
+      )}
       <div
         className={cn(
           'flex flex-1 flex-col items-start p-1 font-mono font-bold leading-none',

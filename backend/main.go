@@ -15,8 +15,23 @@ import (
 )
 
 func main() {
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
+	// Load .env file - try multiple locations
+	envPaths := []string{
+		".env",         // Current directory
+		"backend/.env", // If run from project root
+		"../.env",      // If in a subdirectory
+	}
+
+	loaded := false
+	for _, envPath := range envPaths {
+		if err := godotenv.Load(envPath); err == nil {
+			log.Printf("Loaded .env from %s", envPath)
+			loaded = true
+			break
+		}
+	}
+
+	if !loaded {
 		log.Println("No .env file found, using environment variables")
 	}
 
@@ -77,9 +92,12 @@ func main() {
 			protected.POST("/game/:id/start-single", handlers.StartSinglePlayerGame)
 			protected.POST("/game/:id/call-friend", handlers.CallFriendHandler)
 			protected.POST("/game/:id/call-dealer", handlers.CallDealerHandler)
+			protected.POST("/game/:id/pass-call", handlers.PassCallHandler)
+			protected.GET("/game/:id/check-countdown", handlers.CheckCountdownHandler)
 			protected.POST("/game/:id/flip-bottom", handlers.FlipBottomCardHandler)
 			protected.POST("/game/:id/discard-bottom", handlers.DiscardBottomCardsHandler)
 			protected.POST("/game/:id/play", handlers.PlayCard)
+			protected.POST("/game/:id/pass", handlers.PassTurnHandler)
 			protected.POST("/game/:id/ai-play", handlers.AIPlayHandler)
 			// Replay APIs
 			protected.GET("/game/:id/replay", handlers.GetGameReplayHandler)

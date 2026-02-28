@@ -10,12 +10,39 @@ interface IPlayerSeatProps {
   position: 'top' | 'left' | 'right' | 'bottom-left' | 'bottom-right';
 }
 
-const POSITION_CLASSES: Record<string, string> = {
-  top: 'top-4 left-1/2 -translate-x-1/2',
-  left: 'left-4 top-1/2 -translate-y-1/2',
-  right: 'right-4 top-1/2 -translate-y-1/2',
-  'bottom-left': 'bottom-28 left-8',
-  'bottom-right': 'bottom-28 right-8',
+// 圆桌布局：5个玩家均匀分布在圆周上
+// 假设玩家自己在底部中心，其他4个玩家分布在圆周的其他位置
+const POSITION_STYLES: Record<string, React.CSSProperties> = {
+  'top': {
+    top: '8%',
+    left: '50%',
+    transform: 'translateX(-50%)',
+  },
+  'top-left': {
+    top: '20%',
+    left: '15%',
+  },
+  'top-right': {
+    top: '20%',
+    right: '15%',
+  },
+  'bottom-left': {
+    bottom: '25%',
+    left: '8%',
+  },
+  'bottom-right': {
+    bottom: '25%',
+    right: '8%',
+  },
+  // Keeping old positions for backward compatibility
+  'left': {
+    top: '20%',
+    left: '15%',
+  },
+  'right': {
+    top: '20%',
+    right: '15%',
+  },
 };
 
 export default function PlayerSeat({
@@ -24,8 +51,13 @@ export default function PlayerSeat({
   isDealer = false,
   position,
 }: IPlayerSeatProps) {
+  const positionStyle = POSITION_STYLES[position] || {};
+
   return (
-    <div className={cn('absolute flex flex-col items-center gap-1', POSITION_CLASSES[position])}>
+    <div
+      className="absolute flex flex-col items-center gap-1"
+      style={positionStyle}
+    >
       <div
         className={cn(
           'flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all',

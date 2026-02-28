@@ -40,6 +40,7 @@ export interface IGameState {
   myHand: ICard[];
   myPosition: number;
   trumpSuit: ECardSuit | null;
+  trumpRank?: string; // 级牌点数
   bottomCards: ICard[];
   scores: Record<number, number>;
   // 叫庄相关

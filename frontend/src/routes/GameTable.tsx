@@ -1,5 +1,5 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft, Play, SkipForward, Bot, Film } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, SkipForward, Film } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
@@ -10,6 +10,7 @@ import CallFriendDialog from '@/components/game/CallFriendDialog';
 import {
   useGameTable,
   usePlayCards,
+  usePassTurn,
   useAiPlay,
   useStartGame,
   useStartSinglePlayerGame,
@@ -23,7 +24,7 @@ import { useAuthStore } from '@/store/authStore';
 import { EGameStatus, ECardSuit } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 
-const SEAT_POSITIONS = ['top', 'left', 'right', 'bottom-left', 'bottom-right'] as const;
+const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
 
 export default function GameTable() {
   const { id } = useParams<{ id: string }>();
@@ -36,6 +37,7 @@ export default function GameTable() {
 
   const { data, isLoading, isError } = useGameTable(gameId);
   const playCards = usePlayCards(gameId);
+  const passTurn = usePassTurn(gameId);
   const aiPlay = useAiPlay(gameId);
   const callDealerMutation = useCallDealer(gameId);
   const discardMutation = useDiscardBottomCards(gameId);
@@ -45,6 +47,7 @@ export default function GameTable() {
   const joinGameMutation = useJoinGame();
   const hasTriggeredAutoStartRef = useRef(false);
   const hasAttemptedJoinRef = useRef(false);
+  const lastAITurnRef = useRef<number | null>(null);
   const game = data?.game;
 
   // DEBUG: Log game data
@@ -94,13 +97,39 @@ export default function GameTable() {
     if (!user?.id) return;
 
     // 检查当前用户是否已经在游戏中
-    const isInGame = game.players?.some(p => p.userId === user.id);
+    const isInGame = game.players?.some(p => p.id === Number(user.id));
     if (!isInGame && game.status === EGameStatus.WAITING) {
       console.log('自动加入游戏');
       hasAttemptedJoinRef.current = true;
       joinGameMutation.mutate(gameId);
     }
   }, [game?.players, game?.status, gameId, user?.id, isSinglePlayerRoute]);
+
+  // AI自动出牌
+  useEffect(() => {
+    if (!game) return;
+    if (game.status !== EGameStatus.PLAYING) return;
+
+    // 查找当前玩家
+    const currentPlayer = game.players.find(p => p.position === game.currentPlayer);
+    if (!currentPlayer || !currentPlayer.isAI) {
+      // 重置ref如果不是AI的回合
+      lastAITurnRef.current = null;
+      return;
+    }
+
+    // 检查是否已经为这个玩家的这个回合触发过AI出牌
+    const turnKey = game.currentPlayer;
+    if (lastAITurnRef.current === turnKey) {
+      return; // 已经触发过，不再重复触发
+    }
+
+    // 如果是AI且没有正在执行操作，自动触发AI出牌
+    if (!aiPlay.isPending) {
+      lastAITurnRef.current = turnKey;
+      setTimeout(() => aiPlay.mutate(), 500); // 延迟500ms让用户看到轮到AI了
+    }
+  }, [game?.currentPlayer, game?.status]);
 
   // 5人自动开始游戏
   useEffect(() => {
@@ -145,6 +174,13 @@ export default function GameTable() {
     if (selectedCardIndices.size === 0) return;
     playCards.mutate(
       { cardIndices: Array.from(selectedCardIndices) },
+      { onSuccess: () => clearSelection() },
+    );
+  };
+
+  const handlePass = () => {
+    passTurn.mutate(
+      undefined,
       { onSuccess: () => clearSelection() },
     );
   };
@@ -260,7 +296,13 @@ export default function GameTable() {
       </div>
 
       <div className="border-t border-border/40 bg-background/95 p-4">
-        <PlayerHand cards={game.myHand} />
+        <PlayerHand
+          cards={game.myHand}
+          trumpRank={game.trumpRank}
+          trumpSuit={game.trumpSuit}
+          gameStatus={game.status}
+          callRecords={game.callRecords}
+        />
 
         {/* 叫庄对话框 */}
         {showCallDialog && (
@@ -307,7 +349,7 @@ export default function GameTable() {
                       className="rounded-full bg-amber-900/40 px-3 py-1 text-sm text-amber-100"
                     >
                       {player.username}
-                      {player.userId === user?.id && ' (你)'}
+                      {player.id === Number(user?.id) && ' (你)'}
                     </div>
                   ))}
                 </div>
@@ -337,6 +379,8 @@ export default function GameTable() {
               )}
             </div>
           )}
+
+          <div className="flex flex-col gap-3">
             {game.status === EGameStatus.CALLING && !showCallDialog && (
               <Button
                 variant="game"
@@ -379,19 +423,15 @@ export default function GameTable() {
                   {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
                   出牌 ({selectedCardIndices.size})
                 </Button>
-                <Button variant="outline" size="lg" className="gap-2 text-base" onClick={clearSelection}>
-                  <SkipForward className="h-5 w-5" />
-                  不出
-                </Button>
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   size="lg"
                   className="gap-2 text-base"
-                  onClick={() => aiPlay.mutate()}
-                  disabled={aiPlay.isPending}
+                  onClick={handlePass}
+                  disabled={passTurn.isPending}
                 >
-                  {aiPlay.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bot className="h-5 w-5" />}
-                  AI 出牌
+                  {passTurn.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <SkipForward className="h-5 w-5" />}
+                  不出
                 </Button>
               </>
             )}

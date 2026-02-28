@@ -504,6 +504,40 @@ func CallDealerHandler(c *gin.Context) {
 	})
 }
 
+// PassCallHandler handles a player passing on calling for dealer (不叫)
+func PassCallHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	table, err := models.PassCall(gameID, user.ID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "不叫成功",
+	})
+}
+
+// CheckCountdownHandler 检查并处理倒计时
+func CheckCountdownHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, err := models.CheckAndProcessCountdown(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+	})
+}
+
 // FlipBottomCardHandler handles flipping a card from the bottom
 func FlipBottomCardHandler(c *gin.Context) {
 	gameID := c.Param("id")
@@ -611,16 +645,50 @@ func StartSinglePlayerGame(c *gin.Context) {
 		return
 	}
 
-	// 自动为玩家抢庄（单人模式）
-	table, err = models.AutoCallForDealer(gameID)
+	// StartSinglePlayerGame now handles auto-calling and AI counter-calling internally
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+	})
+}
+
+// PassTurnHandler handles a player passing their turn (不出)
+func PassTurnHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	result, err := models.PassTurn(gameID, user.ID)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	// Log the pass action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "pass",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: nil,
+			ResultData: result,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"table":   table,
+		"result":  result,
+		"message": "Pass successful",
 	})
 }
 
@@ -757,8 +825,11 @@ func GetGameTableHandler(c *gin.Context) {
 		"myHand":        myHand,
 		"myPosition":    myPosition,
 		"trumpSuit":     trumpSuit,
+		"trumpRank":     table.TrumpRank,
 		"bottomCards":   table.BottomCards,
 		"scores":        scores,
+		"dealerSeat":    table.DealerSeat,
+		"callRecords":   table.CallRecords,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
