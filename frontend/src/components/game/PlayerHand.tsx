@@ -1,5 +1,4 @@
 import PlayingCard from './PlayingCard';
-import { sortCards } from '@/lib/card';
 import { useGameStore } from '@/store/gameStore';
 import type { ICard } from '@/types';
 import { useEffect, useRef } from 'react';
@@ -10,7 +9,6 @@ interface IPlayerHandProps {
   trumpRank?: string; // 当前级牌点数
   trumpSuit?: string; // 主牌花色
   gameStatus?: string; // 游戏状态
-  callRecords?: Array<{ suit: string; rank: string }>; // 叫庄记录
 }
 
 export default function PlayerHand({
@@ -19,10 +17,8 @@ export default function PlayerHand({
   trumpRank,
   trumpSuit,
   gameStatus,
-  callRecords = [],
 }: IPlayerHandProps) {
   const { selectedCardIndices, toggleCard, setCardCount } = useGameStore();
-  const sorted = sortCards(cards);
   const prevCount = useRef(cards.length);
 
   useEffect(() => {
@@ -33,8 +29,8 @@ export default function PlayerHand({
   }, [cards.length, setCardCount]);
 
   // 判断是否是级牌
-  const isTrumpRankCard = (card: ICard) => {
-    return trumpRank && card.value === trumpRank;
+  const isTrumpRankCard = (card: ICard): boolean => {
+    return trumpRank ? card.value === trumpRank : false;
   };
 
   // 判断是否是主牌（叫庄结束后）
@@ -50,7 +46,7 @@ export default function PlayerHand({
   };
 
   // 判断是否显示级牌高亮（叫庄阶段）
-  const shouldHighlightTrumpRank = (card: ICard) => {
+  const shouldHighlightTrumpRank = (card: ICard): boolean => {
     if (gameStatus !== 'calling') return false;
     return isTrumpRankCard(card);
   };
@@ -71,7 +67,7 @@ export default function PlayerHand({
 
   return (
     <div className="flex flex-wrap items-end justify-center gap-1">
-      {sorted.map((card, i) => (
+      {cards.map((card, i) => (
         <div
           key={`${card.suit}-${card.value}-${i}`}
           className="animate-card-deal"

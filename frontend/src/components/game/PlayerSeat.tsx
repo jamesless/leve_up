@@ -7,7 +7,7 @@ interface IPlayerSeatProps {
   player?: IPlayer;
   isCurrentTurn?: boolean;
   isDealer?: boolean;
-  position: 'top' | 'left' | 'right' | 'bottom-left' | 'bottom-right';
+  position: 'top' | 'left' | 'right' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
 }
 
 // 圆桌布局：5个玩家均匀分布在圆周上

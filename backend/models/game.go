@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"math/rand"
 	"sort"
 	"time"
@@ -254,7 +255,8 @@ func GetTableGame(gameID string) (*GameTable, error) {
 	}
 
 	// 自动递减倒计时（基于UpdatedAt时间戳）
-	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown > 0 {
+	// 只有在有人叫庄后才递减倒计时
+	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown > 0 && len(table.CallRecords) > 0 {
 		elapsed := int(time.Since(table.UpdatedAt).Seconds())
 		if elapsed > 0 {
 			table.CallCountdown -= elapsed
@@ -264,7 +266,45 @@ func GetTableGame(gameID string) (*GameTable, error) {
 			table.UpdatedAt = time.Now()
 			// 更新内存中的倒计时
 			activeGames[gameID] = table
+			log.Printf("[GetTableGame] Countdown updated: %d seconds remaining", table.CallCountdown)
 		}
+	}
+
+	// 当倒计时为0且有人叫庄时，自动确定庄家
+	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown <= 0 && len(table.CallRecords) > 0 {
+		// 有人叫庄，倒计时结束，确定庄家
+		lastCall := table.CallRecords[len(table.CallRecords)-1]
+		table.DealerSeat = lastCall.Seat
+		table.HostID = table.PlayerHands[lastCall.Seat].UserID
+		table.TrumpSuit = lastCall.Suit
+		table.TrumpRank = lastCall.Rank
+		table.CallPhase = "finished"
+		log.Printf("[GetTableGame] Countdown ended, dealer confirmed: seat=%d, trumpSuit=%s, trumpRank=%s",
+			table.DealerSeat, table.TrumpSuit, table.TrumpRank)
+
+		// 记录确定庄家的日志
+		LogGameAction(GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "dealer_confirmed",
+			PlayerSeat: 0,
+			PlayerID:   "",
+			ActionData: map[string]interface{}{
+				"reason": "countdown_ended",
+			},
+			ResultData: map[string]interface{}{
+				"dealer_seat": table.DealerSeat,
+				"trump_suit":  table.TrumpSuit,
+				"trump_rank":  table.TrumpRank,
+			},
+		})
+
+		// 单人模式：直接进入找朋友阶段
+		if isSinglePlayerGame(table) {
+			return finalizeDealerAndStartPlaying(table)
+		}
+
+		table.UpdatedAt = time.Now()
+		activeGames[gameID] = table
 	}
 
 	return table, nil
@@ -2934,25 +2974,38 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		}
 	}
 
-	// 获取玩家信息以确定应该使用的级牌
-	playerUser, err := GetUserByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("无法获取玩家信息")
+	// 使用游戏的当前等级，而不是玩家的个人等级
+	// 在升级游戏中，所有玩家使用相同的等级（从2开始）
+	gameLevel := table.CurrentLevel
+	// 备用：如果 CurrentLevel 为空，使用 TrumpRank 或默认值 "2"
+	if gameLevel == "" {
+		gameLevel = table.TrumpRank
 	}
-	playerLevel := playerUser.Level
+	if gameLevel == "" {
+		gameLevel = "2" // 默认从2级开始
+		log.Printf("[CallDealer] WARNING: CurrentLevel and TrumpRank are empty, using default '2'")
+	}
+
+	// 调试：打印完整的表格信息
+	log.Printf("[CallDealer] DEBUG: table.CurrentLevel='%s', TrumpRank='%s', final gameLevel='%s'",
+		table.CurrentLevel, table.TrumpRank, gameLevel)
 
 	// 确定应该验证的级牌点数
 	var rank string
 	isFirstCall := len(table.CallRecords) == 0
 
+	log.Printf("[CallDealer] userID=%s, gameLevel='%s', isFirstCall=%v, CallRecords count=%d",
+		userID, gameLevel, isFirstCall, len(table.CallRecords))
+
 	if isFirstCall {
-		// 首次叫庄：必须使用玩家自己的级牌
-		rank = playerLevel
+		// 首次叫庄：必须使用游戏的当前级牌
+		rank = gameLevel
 	} else {
-		// 反庄：可以使用临时庄家的级牌或玩家自己的级牌
+		// 反庄：可以使用临时庄家的级牌或游戏的当前级牌
 		lastCall := table.CallRecords[len(table.CallRecords)-1]
 		// 这里先不限定，让玩家出牌后再验证是哪种情况
-		rank = "" // 暂时不验证，允许两种级牌
+		rank = ""    // 暂时不验证，允许两种级牌
+		_ = lastCall // 忽略未使用的变量
 	}
 
 	// Validate card indices and check they are rank cards
@@ -2965,15 +3018,16 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 
 		// 检查是否是级牌
 		if isFirstCall {
-			// 首次叫庄：必须是玩家自己的级牌
+			// 首次叫庄：必须是当前等级的级牌
+			log.Printf("[CallDealer] Checking card: value=%s, rank=%s, match=%v", card.Value, rank, card.Value == rank)
 			if card.Value != rank {
-				return nil, fmt.Errorf("首次叫庄只能用自己的级牌")
+				return nil, fmt.Errorf("首次叫庄需要使用 %s 级牌", rank)
 			}
 		} else {
-			// 反庄：可以是临时庄家的级牌或玩家自己的级牌
+			// 反庄：可以是临时庄家的级牌或游戏的当前级牌
 			lastCall := table.CallRecords[len(table.CallRecords)-1]
-			if card.Value != lastCall.Rank && card.Value != playerLevel {
-				return nil, fmt.Errorf("反庄必须使用临时庄家的级牌或自己的级牌")
+			if card.Value != lastCall.Rank && card.Value != gameLevel {
+				return nil, fmt.Errorf("反庄必须使用临时庄家的级牌或当前级牌")
 			}
 			// 记录实际使用的级牌
 			if rank == "" {
@@ -3016,10 +3070,10 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 
 		// 判断反庄方式
 		// 特殊情况：当反庄者的级牌也是2（与临时庄家相同）时，用2反庄会转移庄家
-		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank 且 rank != playerLevel）
-		// 方式二：用玩家自己的级牌反庄（rank == playerLevel）
+		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank 且 rank != gameLevel）
+		// 方式二：用游戏当前级牌反庄（rank == gameLevel）
 
-		if rank == lastCall.Rank && rank == playerLevel {
+		if rank == lastCall.Rank && rank == gameLevel {
 			// 特殊情况：反庄者的级牌也是2（与临时庄家相同）
 			// 使用2反庄时，庄家转移给反庄者，同时改变主牌花色
 			table.TrumpRank = rank
@@ -3027,14 +3081,14 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 			table.TrumpSuit = suit
 			table.HostID = userID
 		} else if rank == lastCall.Rank {
-			// 方式一：用临时庄家的级牌反庄（但不是自己的级牌）
+			// 方式一：用临时庄家的级牌反庄（但不是当前级牌）
 			// 庄家不变，只变主牌花色
 			table.TrumpSuit = suit
 			// 庄家保持为lastCall.Seat
 			table.DealerSeat = lastCall.Seat
 			table.HostID = table.PlayerHands[lastCall.Seat].UserID
-		} else if rank == playerLevel {
-			// 方式二：用玩家自己的级牌反庄
+		} else if rank == gameLevel {
+			// 方式二：用游戏当前级牌反庄
 			// 玩家变为临时庄家，主牌花色变为玩家亮的花色
 			table.TrumpRank = rank
 			table.DealerSeat = playerSeat
@@ -3092,6 +3146,12 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	}
 
 	table.UpdatedAt = time.Now()
+
+	// 保存游戏状态到内存
+	activeGames[gameID] = table
+	log.Printf("[CallDealer] Saved game state: CallRecords=%d, CallCountdown=%d, DealerSeat=%d",
+		len(table.CallRecords), table.CallCountdown, table.DealerSeat)
+
 	return table, nil
 }
 
@@ -3217,6 +3277,12 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 	}
 
 	table.UpdatedAt = time.Now()
+
+	// 保存游戏状态到内存
+	activeGames[gameID] = table
+	log.Printf("[PassCall] Saved game state: PassedSeats=%v, CallRecords=%d",
+		table.PassedSeats, len(table.CallRecords))
+
 	return table, nil
 }
 

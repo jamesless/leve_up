@@ -299,9 +299,8 @@ export default function GameTable() {
         <PlayerHand
           cards={game.myHand}
           trumpRank={game.trumpRank}
-          trumpSuit={game.trumpSuit}
+          trumpSuit={game.trumpSuit ?? undefined}
           gameStatus={game.status}
-          callRecords={game.callRecords}
         />
 
         {/* 叫庄对话框 */}
