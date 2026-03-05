@@ -203,6 +203,11 @@ func CreateGame(c *gin.Context) {
 		return
 	}
 
+	// WebSocket broadcast: notify all clients about new room
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomCreated(game)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"game":    game,
@@ -303,6 +308,11 @@ func JoinGame(c *gin.Context) {
 
 	game, _ := models.GetGame(gameID)
 
+	// WebSocket broadcast: notify all clients about room update
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Joined game successfully",
@@ -371,6 +381,14 @@ func StartGameHandler(c *gin.Context) {
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// WebSocket broadcast: notify all clients about room status change
+	if hub := GetWebSocketHub(); hub != nil {
+		game, _ := models.GetGame(gameID)
+		if game != nil {
+			hub.BroadcastRoomUpdate(game)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

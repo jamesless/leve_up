@@ -2934,17 +2934,53 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		}
 	}
 
+	// 获取玩家信息以确定应该使用的级牌
+	playerUser, err := GetUserByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("无法获取玩家信息")
+	}
+	playerLevel := playerUser.Level
+
+	// 确定应该验证的级牌点数
+	var rank string
+	isFirstCall := len(table.CallRecords) == 0
+
+	if isFirstCall {
+		// 首次叫庄：必须使用玩家自己的级牌
+		rank = playerLevel
+	} else {
+		// 反庄：可以使用临时庄家的级牌或玩家自己的级牌
+		lastCall := table.CallRecords[len(table.CallRecords)-1]
+		// 这里先不限定，让玩家出牌后再验证是哪种情况
+		rank = "" // 暂时不验证，允许两种级牌
+	}
+
 	// Validate card indices and check they are rank cards
-	rank := table.TrumpRank // 当前级牌点数（如"2"）
 	var cardsToPlay []Card
 	for _, idx := range cardIndices {
 		if idx < 0 || idx >= len(hand.Cards) {
 			return nil, fmt.Errorf("invalid card index")
 		}
 		card := hand.Cards[idx]
+
 		// 检查是否是级牌
-		if card.Value != rank {
-			return nil, fmt.Errorf("只能用级牌叫庄")
+		if isFirstCall {
+			// 首次叫庄：必须是玩家自己的级牌
+			if card.Value != rank {
+				return nil, fmt.Errorf("首次叫庄只能用自己的级牌")
+			}
+		} else {
+			// 反庄：可以是临时庄家的级牌或玩家自己的级牌
+			lastCall := table.CallRecords[len(table.CallRecords)-1]
+			if card.Value != lastCall.Rank && card.Value != playerLevel {
+				return nil, fmt.Errorf("反庄必须使用临时庄家的级牌或自己的级牌")
+			}
+			// 记录实际使用的级牌
+			if rank == "" {
+				rank = card.Value
+			} else if rank != card.Value {
+				return nil, fmt.Errorf("叫庄的级牌必须是同一点数")
+			}
 		}
 		cardsToPlay = append(cardsToPlay, card)
 	}
@@ -2978,13 +3014,6 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 			return nil, fmt.Errorf("反主最多3张")
 		}
 
-		// 获取反庄玩家的等级
-		playerUser, err := GetUserByID(userID)
-		if err != nil {
-			return nil, fmt.Errorf("无法获取玩家信息")
-		}
-		playerLevel := playerUser.Level
-
 		// 判断反庄方式
 		// 特殊情况：当反庄者的级牌也是2（与临时庄家相同）时，用2反庄会转移庄家
 		// 方式一：用临时庄家的级牌反庄（rank == lastCall.Rank 且 rank != playerLevel）
@@ -3013,18 +3042,6 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 			table.HostID = userID
 		} else {
 			return nil, fmt.Errorf("反庄必须使用临时庄家的级牌或自己的级牌")
-		}
-	}
-
-	// 首次叫庄或反庄成功后，验证rank是否为玩家的等级
-	if len(table.CallRecords) == 1 {
-		// 首次叫庄，必须使用玩家自己的级牌
-		playerUser, err := GetUserByID(userID)
-		if err != nil {
-			return nil, fmt.Errorf("无法获取玩家信息")
-		}
-		if rank != playerUser.Level {
-			return nil, fmt.Errorf("首次叫庄必须使用自己的级牌")
 		}
 	}
 

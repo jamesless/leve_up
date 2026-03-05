@@ -32,4 +32,8 @@ backend/tmp/
 *.log
 npm-debug.log*
 
+# Test files
+test/
+*.test.go
+
 skills-lock.json

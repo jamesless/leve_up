@@ -4,6 +4,7 @@ import (
 	"leve_up/handlers"
 	"leve_up/middleware"
 	"leve_up/models"
+	ws "leve_up/websocket"
 	"log"
 	"os"
 	"path/filepath"
@@ -40,6 +41,12 @@ func main() {
 		log.Fatal("Failed to initialize database:", err)
 	}
 
+	// Initialize WebSocket hub
+	hub := ws.NewHub()
+	go hub.Run()
+	handlers.SetWebSocketHub(hub)
+	log.Println("WebSocket hub started")
+
 	// Create Gin router
 	r := gin.Default()
 
@@ -72,6 +79,9 @@ func main() {
 	// API routes
 	api := r.Group("/api")
 	{
+		// WebSocket endpoint
+		api.GET("/ws/lobby", handlers.WebSocketHandler(hub))
+
 		// Auth routes
 		api.POST("/register", handlers.Register)
 		api.POST("/login", handlers.Login)

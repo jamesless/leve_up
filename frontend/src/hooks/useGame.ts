@@ -1,13 +1,43 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import * as gameService from '@/services/game';
 import type { IPlayCardRequest } from '@/types';
 
-export function useGameList() {
+export function useGameList(wsConnected = false) {
+  const [isActive, setIsActive] = useState(true);
+
+  useEffect(() => {
+    let timeoutId: number;
+
+    const handleActivity = () => {
+      setIsActive(true);
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => setIsActive(false), 30000);
+    };
+
+    // 初始触发
+    handleActivity();
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('click', handleActivity);
+    window.addEventListener('scroll', handleActivity);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('scroll', handleActivity);
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
   return useQuery({
     queryKey: ['games'],
     queryFn: () => gameService.listGames(),
-    refetchInterval: 5000,
+    refetchInterval: wsConnected ? 30000 : isActive ? 5000 : 15000,
+    staleTime: 3000,
   });
 }
 
