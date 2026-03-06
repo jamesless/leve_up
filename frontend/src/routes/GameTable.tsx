@@ -12,7 +12,6 @@ import {
   usePlayCards,
   usePassTurn,
   useAiPlay,
-  useStartGame,
   useStartSinglePlayerGame,
   useCallDealer,
   useDiscardBottomCards,
@@ -46,14 +45,13 @@ export default function GameTable() {
   const callDealerMutation = useCallDealer(gameId);
   const discardMutation = useDiscardBottomCards(gameId);
   const callFriendMutation = useCallFriend(gameId);
-  const startGameMutation = useStartGame();
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
   const joinGameMutation = useJoinGame();
   const readyMutation = usePlayerReady(gameId);
   const cancelReadyMutation = useCancelReady(gameId);
   const { data: readyStatusData } = useReadyStatus(gameId);
   const dealNextCardMutation = useDealNextCard(gameId);
-  const dealingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const dealingIntervalRef = useRef<number | null>(null);
   const hasTriggeredAutoStartRef = useRef(false);
   const hasAttemptedJoinRef = useRef(false);
   const lastAITurnRef = useRef<number | null>(null);
@@ -262,7 +260,7 @@ export default function GameTable() {
               : game.status === EGameStatus.DEALING
                 ? '发牌中'
                 : game.status === EGameStatus.CALLING
-                  ? '叫庄中'
+                  ? `叫庄中${game.callCountdown ? ` (${game.callCountdown}秒)` : ''}`
                   : game.status === EGameStatus.CALLING_FRIEND
                     ? '叫朋友中'
                     : game.status === EGameStatus.DISCARDING
@@ -278,7 +276,7 @@ export default function GameTable() {
           )}
           {game.trumpSuit && (
             <Badge variant="outline" className="gap-1">
-              主牌: {game.trumpSuit}
+              主牌: {game.trumpSuit === 'hearts' ? '红桃' : game.trumpSuit === 'diamonds' ? '方片' : game.trumpSuit === 'clubs' ? '梅花' : game.trumpSuit === 'spades' ? '黑桃' : game.trumpSuit}
             </Badge>
           )}
         </div>

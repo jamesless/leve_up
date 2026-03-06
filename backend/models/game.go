@@ -296,7 +296,7 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 		table.DealingPhase = "finished"
 		table.Status = "calling"
 		table.CallPhase = "counting"
-		table.CallCountdown = 10 // 10秒倒计时
+		table.CallCountdown = 30 // 30秒倒计时（根据规则）
 		table.UpdatedAt = time.Now()
 		activeGames[gameID] = table
 
@@ -347,8 +347,8 @@ func GetTableGame(gameID string) (*GameTable, error) {
 	}
 
 	// 自动递减倒计时（基于UpdatedAt时间戳）
-	// 只有在有人叫庄后才递减倒计时
-	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown > 0 && len(table.CallRecords) > 0 {
+	// 在叫庄阶段，无论有没有人叫庄都应该倒计时
+	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown > 0 {
 		elapsed := int(time.Since(table.UpdatedAt).Seconds())
 		if elapsed > 0 {
 			table.CallCountdown -= elapsed
@@ -3032,7 +3032,7 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 
 	// 允许在发牌阶段或叫庄阶段抢庄
 	if table.Status != "calling" && table.Status != "dealing" {
-		return nil, fmt.Errorf("game not in calling or dealing phase")
+		return nil, fmt.Errorf("游戏不在叫庄或发牌阶段")
 	}
 
 	// Find player's seat
@@ -3047,25 +3047,25 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	}
 
 	if hand == nil {
-		return nil, fmt.Errorf("player not in game")
+		return nil, fmt.Errorf("玩家不在游戏中")
 	}
 
 	// 允许在发牌阶段或倒计时阶段抢庄
 	if table.CallPhase != "counting" && table.CallPhase != "dealing" {
-		return nil, fmt.Errorf("not in countdown or dealing phase")
+		return nil, fmt.Errorf("不在叫庄倒计时或发牌阶段")
 	}
 
 	// 检查玩家是否已经叫过庄
 	for _, record := range table.CallRecords {
 		if record.Seat == playerSeat {
-			return nil, fmt.Errorf("you have already called")
+			return nil, fmt.Errorf("你已经叫过庄了")
 		}
 	}
 
 	// 检查玩家是否已经选择不叫
 	for _, seat := range table.PassedSeats {
 		if seat == playerSeat {
-			return nil, fmt.Errorf("you have already passed")
+			return nil, fmt.Errorf("你已经选择不叫")
 		}
 	}
 
@@ -3106,7 +3106,7 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	var cardsToPlay []Card
 	for _, idx := range cardIndices {
 		if idx < 0 || idx >= len(hand.Cards) {
-			return nil, fmt.Errorf("invalid card index")
+			return nil, fmt.Errorf("无效的牌索引")
 		}
 		card := hand.Cards[idx]
 
@@ -3213,6 +3213,7 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	// 有人叫庄后，重置倒计时为5秒，让其他玩家有机会反庄
 	// 不要立即设置为finished
 	table.CallCountdown = 5
+	table.CallPhase = "counting" // 确保仍在倒计时状态，允许反庄
 
 	// 记录抢庄日志
 	LogGameAction(GameActionLogRequest{
@@ -3267,7 +3268,7 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 	}
 
 	if table.Status != "calling" {
-		return nil, fmt.Errorf("game not in calling phase")
+		return nil, fmt.Errorf("游戏不在叫庄阶段")
 	}
 
 	// Find player's seat
@@ -3282,17 +3283,17 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 	}
 
 	if hand == nil {
-		return nil, fmt.Errorf("player not in game")
+		return nil, fmt.Errorf("玩家不在游戏中")
 	}
 
 	if table.CallPhase != "counting" {
-		return nil, fmt.Errorf("not in countdown phase")
+		return nil, fmt.Errorf("不在叫庄倒计时阶段")
 	}
 
 	// 检查玩家是否已经叫过庄
 	for _, record := range table.CallRecords {
 		if record.Seat == playerSeat {
-			return nil, fmt.Errorf("you have already called")
+			return nil, fmt.Errorf("你已经叫过庄了")
 		}
 	}
 
