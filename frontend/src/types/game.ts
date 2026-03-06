@@ -2,6 +2,7 @@ import type { ICard, ECardSuit } from './card';
 
 export enum EGameStatus {
   WAITING = 'waiting',
+  DEALING = 'dealing',           // 发牌阶段
   CALLING = 'calling',           // 叫庄阶段
   CALLING_FRIEND = 'calling_friend', // 叫朋友阶段
   DISCARDING = 'discarding',     // 扣牌阶段
@@ -16,6 +17,7 @@ export interface IPlayer {
   isReady: boolean;
   isAI: boolean;
   cardCount: number;
+  level: string;
 }
 
 export interface IRoom {
@@ -49,6 +51,10 @@ export interface IGameState {
   currentCaller?: number;
   callRecords?: ICallRecord[];
   flippedBottomCards?: ICard[];
+  // 发牌相关
+  dealtCardCount?: number;
+  totalCardsPerPlayer?: number;
+  dealingPhase?: string;
 }
 
 export interface ICallRecord {

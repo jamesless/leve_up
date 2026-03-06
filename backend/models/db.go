@@ -131,6 +131,7 @@ func createTables() error {
 		game_id VARCHAR(64) NOT NULL,
 		user_id VARCHAR(64) NOT NULL,
 		seat_number INT DEFAULT 0,
+		is_ready BOOLEAN DEFAULT FALSE,
 		joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -139,6 +140,11 @@ func createTables() error {
 
 	if _, err := db.Exec(gamePlayersTable); err != nil {
 		return fmt.Errorf("failed to create game_players table: %w", err)
+	}
+
+	// Migration: Add is_ready column if it doesn't exist
+	if _, err := db.Exec(`ALTER TABLE game_players ADD COLUMN IF NOT EXISTS is_ready BOOLEAN DEFAULT FALSE`); err != nil {
+		log.Println("Warning: failed to add is_ready column:", err)
 	}
 
 	// Create game_records table for game history

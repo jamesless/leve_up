@@ -58,24 +58,34 @@ export default function PlayerSeat({
       className="absolute flex flex-col items-center gap-1"
       style={positionStyle}
     >
-      <div
-        className={cn(
-          'flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all',
-          player
-            ? isCurrentTurn
-              ? 'border-amber-400 bg-amber-400/10 shadow-lg shadow-amber-400/20'
-              : 'border-slate-600 bg-slate-800'
-            : 'border-dashed border-slate-700 bg-slate-900/50',
-        )}
-      >
-        {player ? (
-          player.isAI ? (
-            <span className="text-lg">🤖</span>
+      <div className="relative">
+        <div
+          className={cn(
+            'flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all',
+            player
+              ? isCurrentTurn
+                ? 'border-amber-400 bg-amber-400/10 shadow-lg shadow-amber-400/20'
+                : 'border-slate-600 bg-slate-800'
+              : 'border-dashed border-slate-700 bg-slate-900/50',
+          )}
+        >
+          {player ? (
+            player.isAI ? (
+              <span className="text-lg">🤖</span>
+            ) : (
+              <User className="h-5 w-5 text-slate-400" />
+            )
           ) : (
-            <User className="h-5 w-5 text-slate-400" />
-          )
-        ) : (
-          <span className="text-xs text-slate-600">空位</span>
+            <span className="text-xs text-slate-600">空位</span>
+          )}
+        </div>
+        {player && !player.isAI && (
+          <Badge
+            variant="default"
+            className="absolute -top-1 -right-1 text-[10px] px-1 py-0 min-w-[18px] h-[18px] flex items-center justify-center bg-amber-500 text-white border-0"
+          >
+            {player.level || '2'}
+          </Badge>
         )}
       </div>
       {player && (

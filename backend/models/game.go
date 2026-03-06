@@ -76,6 +76,12 @@ type GameTable struct {
 	CallRecords        []CallRecord `json:"callRecords"`        // 抢庄记录
 	PassedSeats        []int        `json:"passedSeats"`        // 选择不叫的玩家座位号列表
 
+	// 发牌相关字段
+	DealingPhase        string `json:"dealingPhase"`        // 发牌阶段: dealing, finished
+	DealtCardCount      int    `json:"dealtCardCount"`      // 已发牌轮数（每轮5张，每人1张）
+	TotalCardsPerPlayer int    `json:"totalCardsPerPlayer"` // 每人总牌数（31）
+	DealingCards        []Card `json:"-"`                   // 待发的牌（不返回给前端）
+
 	// 上一局结果（用于确定下一局起始发牌人）
 	PreviousResult *PreviousGameResult `json:"previousResult,omitempty"` // 上一局结果
 }
@@ -129,7 +135,7 @@ type PlayResult struct {
 // In-memory game storage (in production, use Redis or similar)
 var activeGames = make(map[string]*GameTable)
 
-// StartGame initializes and starts a game with card dealing
+// StartGame initializes and starts a game with progressive card dealing
 func StartGame(gameID, hostID string) (*GameTable, error) {
 	game, err := GetGame(gameID)
 	if err != nil {
@@ -148,8 +154,12 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 		return nil, fmt.Errorf("game already started")
 	}
 
-	// Deal cards
-	hands, bottomCards := DealCards(5)
+	// 创建并洗好牌（3副牌，共162张）
+	allCards := createShuffledDeck()
+
+	// 分离底牌（最后7张）和待发的牌（前155张）
+	bottomCards := allCards[155:162]
+	dealingCards := allCards[0:155]
 
 	// Determine starting dealer based on previous game result
 	// 规则2.2：起始发牌者根据上一局结果确定
@@ -159,48 +169,50 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 		startingDealer = rand.Intn(5) + 1
 	} else {
 		// 有上一局结果，根据规则确定
-		// 查询上一局的详细结果
 		prevResult, err := getPreviousGameResult(gameID)
 		if err != nil {
-			// 如果查询失败，使用默认值
 			startingDealer = rand.Intn(5) + 1
 		} else {
 			startingDealer = determineStartingDealer(prevResult, game.PreviousDealerSeat)
 		}
 	}
 
-	// Initialize game table
+	// Initialize game table - 进入发牌阶段
 	table := &GameTable{
-		GameID:             gameID,
-		HostID:             hostID,
-		Status:             "calling", // 进入抢庄阶段
-		CurrentLevel:       game.CurrentLevel,
-		TrumpSuit:          "",
-		HostCalledCard:     nil,
-		FriendRevealed:     false,
-		BottomCards:        bottomCards,
-		CurrentPlayer:      startingDealer, // 起始发牌人先叫庄
-		TrickLeader:        startingDealer,
-		CurrentTrick:       make([]PlayedCard, 0),
-		TricksWon:          make([][]Card, 0),
-		PlayerHands:        make(map[int]*PlayerHand),
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-		StartingDealerSeat: startingDealer, // 起始发牌人
-		CurrentCaller:      startingDealer,
-		CallPhase:          "counting", // 倒计时抢庄阶段
-		CallCountdown:      10,         // 10秒倒计时
-		TrumpRank:          game.CurrentLevel,
-		FlippedBottomCards: make([]Card, 0),
-		CallRecords:        make([]CallRecord, 0),
+		GameID:              gameID,
+		HostID:              hostID,
+		Status:              "dealing", // 发牌阶段
+		CurrentLevel:        game.CurrentLevel,
+		TrumpSuit:           "",
+		HostCalledCard:      nil,
+		FriendRevealed:      false,
+		BottomCards:         bottomCards,
+		CurrentPlayer:       startingDealer,
+		TrickLeader:         startingDealer,
+		CurrentTrick:        make([]PlayedCard, 0),
+		TricksWon:           make([][]Card, 0),
+		PlayerHands:         make(map[int]*PlayerHand),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+		StartingDealerSeat:  startingDealer,
+		CurrentCaller:       startingDealer,
+		CallPhase:           "dealing", // 发牌中
+		CallCountdown:       0,         // 发牌完成后才开始倒计时
+		TrumpRank:           game.CurrentLevel,
+		FlippedBottomCards:  make([]Card, 0),
+		CallRecords:         make([]CallRecord, 0),
+		DealingPhase:        "dealing",
+		DealtCardCount:      0,
+		TotalCardsPerPlayer: 31,
+		DealingCards:        dealingCards,
 	}
 
-	// Assign cards to players
+	// 初始化玩家手牌为空（逐张发牌）
 	for i, playerID := range game.PlayerIDs {
 		seat := i + 1
 		table.PlayerHands[seat] = &PlayerHand{
 			UserID:     playerID,
-			Cards:      hands[i],
+			Cards:      make([]Card, 0), // 初始为空
 			SeatNumber: seat,
 			IsFriend:   false,
 			Score:      0,
@@ -224,6 +236,7 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 			"starting_dealer": startingDealer,
 			"current_level":   game.CurrentLevel,
 			"player_count":    len(game.PlayerIDs),
+			"dealing_mode":    "progressive",
 		},
 		ResultData: map[string]interface{}{
 			"status": "success",
@@ -231,6 +244,85 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 	})
 
 	return table, nil
+}
+
+// createShuffledDeck 创建并洗好的牌堆（3副牌，162张）
+func createShuffledDeck() []Card {
+	var allCards []Card
+	suits := []string{"hearts", "diamonds", "clubs", "spades"}
+	values := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
+
+	for deck := 0; deck < 3; deck++ {
+		for _, suit := range suits {
+			for _, value := range values {
+				allCards = append(allCards, Card{
+					Suit:  suit,
+					Value: value,
+					Type:  "normal",
+				})
+			}
+		}
+		// 添加王牌
+		allCards = append(allCards, Card{Suit: "joker", Value: "small", Type: "joker"})
+		allCards = append(allCards, Card{Suit: "joker", Value: "big", Type: "joker"})
+	}
+
+	// 洗牌
+	rand.Shuffle(len(allCards), func(i, j int) {
+		allCards[i], allCards[j] = allCards[j], allCards[i]
+	})
+
+	return allCards
+}
+
+// DealNextCard 发下一轮牌给所有玩家（每人1张）
+// 返回值：(更新后的table, 是否发牌完成, error)
+func DealNextCard(gameID string) (*GameTable, bool, error) {
+	table, exists := activeGames[gameID]
+	if !exists {
+		return nil, false, ErrGameNotFound
+	}
+
+	if table.DealingPhase != "dealing" {
+		return table, true, nil // 发牌已完成
+	}
+
+	// 计算当前已发了多少轮
+	currentRound := table.DealtCardCount
+
+	// 检查是否发完了（31轮）
+	if currentRound >= table.TotalCardsPerPlayer {
+		// 发牌完成，进入叫庄阶段
+		table.DealingPhase = "finished"
+		table.Status = "calling"
+		table.CallPhase = "counting"
+		table.CallCountdown = 10 // 10秒倒计时
+		table.UpdatedAt = time.Now()
+		activeGames[gameID] = table
+
+		log.Printf("[DealNextCard] Dealing complete for game %s, entering calling phase", gameID)
+		return table, true, nil
+	}
+
+	// 给每个玩家发一张牌（第currentRound轮，每人发第currentRound张牌）
+	for seat := 1; seat <= 5; seat++ {
+		cardIndex := currentRound*5 + (seat - 1) // 计算牌在DealingCards中的索引
+		if cardIndex < len(table.DealingCards) {
+			card := table.DealingCards[cardIndex]
+			if hand, ok := table.PlayerHands[seat]; ok {
+				hand.Cards = append(hand.Cards, card)
+			}
+		}
+	}
+
+	table.DealtCardCount = currentRound + 1
+	table.UpdatedAt = time.Now()
+	activeGames[gameID] = table
+
+	log.Printf("[DealNextCard] Round %d complete for game %s, each player now has %d cards",
+		table.DealtCardCount, gameID, table.DealtCardCount)
+
+	return table, false, nil
 }
 
 // GetTableGame retrieves the active game table
@@ -2931,14 +3023,16 @@ func validateSingleSuitFollow(cards []Card, leadSuit string, trumpRank string) e
 
 // CallDealer handles a player calling for dealer (抢庄)
 // 玩家用级牌叫庄，决定主牌花色
+// 允许在发牌阶段(dealing)和叫庄阶段(calling)抢庄
 func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
 	}
 
-	if table.Status != "calling" {
-		return nil, fmt.Errorf("game not in calling phase")
+	// 允许在发牌阶段或叫庄阶段抢庄
+	if table.Status != "calling" && table.Status != "dealing" {
+		return nil, fmt.Errorf("game not in calling or dealing phase")
 	}
 
 	// Find player's seat
@@ -2956,8 +3050,9 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		return nil, fmt.Errorf("player not in game")
 	}
 
-	if table.CallPhase != "counting" {
-		return nil, fmt.Errorf("not in countdown phase")
+	// 允许在发牌阶段或倒计时阶段抢庄
+	if table.CallPhase != "counting" && table.CallPhase != "dealing" {
+		return nil, fmt.Errorf("not in countdown or dealing phase")
 	}
 
 	// 检查玩家是否已经叫过庄
@@ -3002,10 +3097,9 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		rank = gameLevel
 	} else {
 		// 反庄：可以使用临时庄家的级牌或游戏的当前级牌
-		lastCall := table.CallRecords[len(table.CallRecords)-1]
+		// lastCall := table.CallRecords[len(table.CallRecords)-1]
 		// 这里先不限定，让玩家出牌后再验证是哪种情况
-		rank = ""    // 暂时不验证，允许两种级牌
-		_ = lastCall // 忽略未使用的变量
+		rank = "" // 暂时不验证，允许两种级牌
 	}
 
 	// Validate card indices and check they are rank cards
@@ -3037,6 +3131,15 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 			}
 		}
 		cardsToPlay = append(cardsToPlay, card)
+	}
+
+	// 如果没有提供花色，自动从选中的牌中提取
+	if suit == "" {
+		if len(cardsToPlay) == 0 {
+			return nil, fmt.Errorf("至少需要选择一张级牌")
+		}
+		suit = cardsToPlay[0].Suit
+		log.Printf("[CallDealer] Auto-extracted suit from cards: %s", suit)
 	}
 
 	// 检查是否是同花色的级牌
@@ -3941,4 +4044,82 @@ func upgradeLevel(currentLevel string, levelsUp int) string {
 	}
 
 	return levels[newIndex]
+}
+
+// ==================== 玩家准备相关函数 ====================
+
+// PlayerReadyState 玩家准备状态
+type PlayerReadyState struct {
+	UserID   string `json:"userId"`
+	Username string `json:"username"`
+	Seat     int    `json:"seat"`
+	IsReady  bool   `json:"isReady"`
+}
+
+// SetPlayerReady 设置玩家准备状态
+func SetPlayerReady(gameID, userID string, isReady bool) error {
+	query := `UPDATE game_players SET is_ready = $1 WHERE game_id = $2 AND user_id = $3`
+	result, err := db.Exec(query, isReady, gameID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update ready status: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("player not found in game")
+	}
+	return nil
+}
+
+// GetPlayersReadyStatus 获取房间内所有玩家的准备状态
+func GetPlayersReadyStatus(gameID string) ([]PlayerReadyState, error) {
+	query := `
+		SELECT gp.user_id, u.username, gp.seat_number, gp.is_ready
+		FROM game_players gp
+		JOIN users u ON gp.user_id = u.id
+		WHERE gp.game_id = $1
+		ORDER BY gp.seat_number`
+	rows, err := db.Query(query, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ready status: %w", err)
+	}
+	defer rows.Close()
+
+	var states []PlayerReadyState
+	for rows.Next() {
+		var state PlayerReadyState
+		if err := rows.Scan(&state.UserID, &state.Username, &state.Seat, &state.IsReady); err != nil {
+			return nil, fmt.Errorf("failed to scan ready status: %w", err)
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+// AreAllPlayersReady 检查是否所有玩家都准备好了
+func AreAllPlayersReady(gameID string) (bool, int, error) {
+	query := `SELECT COUNT(*) FROM game_players WHERE game_id = $1 AND is_ready = FALSE`
+	var notReadyCount int
+	err := db.QueryRow(query, gameID).Scan(&notReadyCount)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to check ready status: %w", err)
+	}
+
+	// 获取总玩家数
+	var totalPlayers int
+	err = db.QueryRow(`SELECT COUNT(*) FROM game_players WHERE game_id = $1`, gameID).Scan(&totalPlayers)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to get player count: %w", err)
+	}
+
+	return notReadyCount == 0 && totalPlayers == 5, totalPlayers, nil
+}
+
+// ResetPlayersReady 重置所有玩家的准备状态
+func ResetPlayersReady(gameID string) error {
+	query := `UPDATE game_players SET is_ready = FALSE WHERE game_id = $1`
+	_, err := db.Exec(query, gameID)
+	if err != nil {
+		return fmt.Errorf("failed to reset ready status: %w", err)
+	}
+	return nil
 }

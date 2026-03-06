@@ -18,6 +18,10 @@ import {
   useDiscardBottomCards,
   useCallFriend,
   useJoinGame,
+  usePlayerReady,
+  useCancelReady,
+  useReadyStatus,
+  useDealNextCard,
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
@@ -45,6 +49,11 @@ export default function GameTable() {
   const startGameMutation = useStartGame();
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
   const joinGameMutation = useJoinGame();
+  const readyMutation = usePlayerReady(gameId);
+  const cancelReadyMutation = useCancelReady(gameId);
+  const { data: readyStatusData } = useReadyStatus(gameId);
+  const dealNextCardMutation = useDealNextCard(gameId);
+  const dealingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasTriggeredAutoStartRef = useRef(false);
   const hasAttemptedJoinRef = useRef(false);
   const lastAITurnRef = useRef<number | null>(null);
@@ -131,20 +140,36 @@ export default function GameTable() {
     }
   }, [game?.currentPlayer, game?.status]);
 
-  // 5人自动开始游戏
+  // 注意：自动开始游戏的逻辑已移至后端，当5人全部准备后自动触发
+
+  // 发牌轮询逻辑
   useEffect(() => {
     if (!game) return;
-    // 只有在等待状态且玩家数量达到5人时才自动开始
-    if (game.status === EGameStatus.WAITING && game.players && game.players.length >= 5) {
-      // 检查是否是房主，只有房主可以开始游戏
-      const gameInfo = data as unknown as { game?: { hostId?: string } };
-      const hostId = gameInfo?.game?.hostId;
-      if (hostId && user?.id === hostId && !startGameMutation.isPending) {
-        console.log('5人已满，自动开始游戏');
-        startGameMutation.mutate(gameId);
+    if (game.status !== EGameStatus.DEALING) {
+      // 清理轮询
+      if (dealingIntervalRef.current) {
+        clearInterval(dealingIntervalRef.current);
+        dealingIntervalRef.current = null;
       }
+      return;
     }
-  }, [game?.players?.length, game?.status, gameId]);
+
+    // 每200ms请求发下一轮牌
+    if (!dealingIntervalRef.current && !dealNextCardMutation.isPending) {
+      dealingIntervalRef.current = setInterval(() => {
+        if (!dealNextCardMutation.isPending) {
+          dealNextCardMutation.mutate();
+        }
+      }, 200);
+    }
+
+    return () => {
+      if (dealingIntervalRef.current) {
+        clearInterval(dealingIntervalRef.current);
+        dealingIntervalRef.current = null;
+      }
+    };
+  }, [game?.status, dealNextCardMutation.isPending]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!gameId) return <Navigate to="/game" replace />;
@@ -185,9 +210,9 @@ export default function GameTable() {
     );
   };
 
-  const handleCallDealer = (suit: ECardSuit, cardIndices: number[]) => {
+  const handleCallDealer = (cardIndices: number[]) => {
     callDealerMutation.mutate(
-      { suit, cardIndices },
+      { cardIndices },
       { onSuccess: () => {
         clearSelection();
         setShowCallDialog(false);
@@ -234,15 +259,17 @@ export default function GameTable() {
           <Badge variant={game.status === EGameStatus.PLAYING ? 'success' : 'secondary'}>
             {game.status === EGameStatus.WAITING
               ? '等待中'
-              : game.status === EGameStatus.CALLING
-                ? '叫庄中'
-                : game.status === EGameStatus.CALLING_FRIEND
-                  ? '叫朋友中'
-                  : game.status === EGameStatus.DISCARDING
-                    ? '扣牌中'
-                    : game.status === EGameStatus.PLAYING
-                      ? '进行中'
-                      : '已结束'}
+              : game.status === EGameStatus.DEALING
+                ? '发牌中'
+                : game.status === EGameStatus.CALLING
+                  ? '叫庄中'
+                  : game.status === EGameStatus.CALLING_FRIEND
+                    ? '叫朋友中'
+                    : game.status === EGameStatus.DISCARDING
+                      ? '扣牌中'
+                      : game.status === EGameStatus.PLAYING
+                        ? '进行中'
+                        : '已结束'}
           </Badge>
           {game.currentLevel && (
             <Badge variant="outline" className="gap-1">
@@ -309,6 +336,7 @@ export default function GameTable() {
             <CallDealerDialog
               onSubmit={handleCallDealer}
               isPending={callDealerMutation.isPending}
+              currentLevel={game.trumpRank || '2'}
             />
           </div>
         )}
@@ -339,42 +367,112 @@ export default function GameTable() {
             <div className="flex flex-col items-center gap-3">
               <div className="text-center">
                 <p className="text-sm text-amber-200/80">
-                  等待玩家加入... ({game.players?.length || 0}/5)
+                  等待玩家准备... ({readyStatusData?.readyStates?.filter(s => s.isReady).length || 0}/5 已准备)
                 </p>
                 <div className="mt-2 flex flex-wrap justify-center gap-2">
-                  {game.players?.map((player) => (
-                    <div
-                      key={player.id}
-                      className="rounded-full bg-amber-900/40 px-3 py-1 text-sm text-amber-100"
-                    >
-                      {player.username}
-                      {player.id === Number(user?.id) && ' (你)'}
-                    </div>
-                  ))}
+                  {game.players?.map((player) => {
+                    const readyState = readyStatusData?.readyStates?.find(s => s.userId === String(player.id));
+                    const isReady = readyState?.isReady || false;
+                    return (
+                      <div
+                        key={player.id}
+                        className={`rounded-full px-3 py-1 text-sm ${
+                          isReady
+                            ? 'bg-green-600/40 text-green-100'
+                            : 'bg-amber-900/40 text-amber-100'
+                        }`}
+                      >
+                        {player.username}
+                        {player.id === Number(user?.id) && ' (你)'}
+                        {isReady && ' ✓'}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              {(game.players?.length || 0) >= 5 && (
-                <Button
-                  variant="game"
-                  size="lg"
-                  className="gap-2 text-base font-bold"
-                  onClick={() => startGameMutation.mutate(gameId)}
-                  disabled={startGameMutation.isPending}
-                >
-                  {startGameMutation.isPending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <>
-                      <Play className="h-5 w-5" />
-                      5人已满，开始游戏
-                    </>
-                  )}
-                </Button>
-              )}
+
+              {/* 准备/取消准备按钮 */}
+              {(() => {
+                const myReadyState = readyStatusData?.readyStates?.find(s => s.userId === user?.id);
+                const amIReady = myReadyState?.isReady ?? false;
+
+                return amIReady ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="gap-2 text-base border-amber-500/50 text-amber-200 hover:bg-amber-900/30"
+                    onClick={() => cancelReadyMutation.mutate()}
+                    disabled={cancelReadyMutation.isPending}
+                  >
+                    {cancelReadyMutation.isPending ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      '取消准备'
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="game"
+                    size="lg"
+                    className="gap-2 text-base font-bold"
+                    onClick={() => readyMutation.mutate()}
+                    disabled={readyMutation.isPending}
+                  >
+                    {readyMutation.isPending ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Play className="h-5 w-5" />
+                        准备
+                      </>
+                    )}
+                  </Button>
+                );
+              })()}
+
               {(game.players?.length || 0) < 5 && (
                 <p className="text-xs text-amber-200/60">
-                  需要5人才能开始游戏
+                  需要5人加入并全部准备后开始游戏
                 </p>
+              )}
+              {(game.players?.length || 0) >= 5 && (
+                <p className="text-xs text-amber-200/60">
+                  所有玩家准备后游戏将自动开始
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 发牌状态 */}
+          {game.status === EGameStatus.DEALING && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <p className="text-lg font-bold text-amber-100">发牌中...</p>
+                <p className="text-sm text-amber-200/80">
+                  已发 {game.dealtCardCount || 0}/{game.totalCardsPerPlayer || 31} 张/人
+                </p>
+                <div className="mt-2 w-64 h-2 bg-amber-900/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 transition-all duration-200"
+                    style={{ width: `${((game.dealtCardCount || 0) / 31) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* 发牌过程中可以抢庄 */}
+              <p className="text-xs text-amber-300/70">
+                可以在发牌过程中选择级牌进行抢庄
+              </p>
+
+              {selectedCardIndices.size > 0 && (
+                <Button
+                  variant="game"
+                  size="sm"
+                  onClick={() => handleCallDealer(Array.from(selectedCardIndices))}
+                  disabled={callDealerMutation.isPending}
+                >
+                  {callDealerMutation.isPending ? '提交中...' : '抢庄'}
+                </Button>
               )}
             </div>
           )}

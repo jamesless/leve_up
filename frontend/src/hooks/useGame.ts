@@ -176,8 +176,8 @@ export function useCallDealer(gameId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: { suit: string; cardIndices: number[] }) =>
-      gameService.callDealer(gameId, params.suit, params.cardIndices),
+    mutationFn: (params: { cardIndices: number[] }) =>
+      gameService.callDealer(gameId, params.cardIndices),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
     },
@@ -202,6 +202,56 @@ export function useCallFriend(gameId: string) {
   return useMutation({
     mutationFn: (params: { suit: string; value: string; position: number }) =>
       gameService.callFriend(gameId, params.suit, params.value, params.position),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
+  });
+}
+
+// 准备相关hooks
+export function usePlayerReady(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gameService.setPlayerReady(gameId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+      queryClient.invalidateQueries({ queryKey: ['readyStatus', gameId] });
+      // 如果游戏开始了，也刷新游戏状态
+      if (data.gameStarted) {
+        queryClient.invalidateQueries({ queryKey: ['game', gameId] });
+      }
+    },
+  });
+}
+
+export function useCancelReady(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gameService.cancelPlayerReady(gameId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+      queryClient.invalidateQueries({ queryKey: ['readyStatus', gameId] });
+    },
+  });
+}
+
+export function useReadyStatus(gameId: string) {
+  return useQuery({
+    queryKey: ['readyStatus', gameId],
+    queryFn: () => gameService.getReadyStatus(gameId),
+    refetchInterval: 2000, // 每2秒刷新一次
+    enabled: !!gameId,
+  });
+}
+
+// 发牌相关hook
+export function useDealNextCard(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gameService.dealNextCard(gameId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
     },
