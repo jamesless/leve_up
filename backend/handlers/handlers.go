@@ -1007,6 +1007,9 @@ func GetGameTableHandler(c *gin.Context) {
 		"scores":        scores,
 		"dealerSeat":    table.DealerSeat,
 		"callRecords":   table.CallRecords,
+		"passedSeats":   table.PassedSeats,
+		"callCountdown": table.CallCountdown,
+		"callPhase":     table.CallPhase,
 	}
 
 	c.JSON(http.StatusOK, gin.H{

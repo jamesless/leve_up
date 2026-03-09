@@ -12,6 +12,7 @@ interface IPlayingCardProps {
   isTrumpRank?: boolean; // 是否是级牌（叫庄阶段高亮）
   isTrump?: boolean; // 是否是主牌（叫庄结束后高亮）
   showTrumpLabel?: boolean; // 是否显示"主"标签
+  isFriend?: boolean; // 是否是盟友牌
 }
 
 const SIZE_CLASSES = {
@@ -30,6 +31,7 @@ export default function PlayingCard({
   isTrumpRank = false,
   isTrump = false,
   showTrumpLabel = false,
+  isFriend = false,
 }: IPlayingCardProps) {
   if (faceDown) {
     return (
@@ -73,6 +75,12 @@ export default function PlayingCard({
       {showTrumpLabel && (
         <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded bg-green-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
           主
+        </div>
+      )}
+      {/* 盟友牌标签 */}
+      {isFriend && (
+        <div className="absolute -right-1 -top-1 rounded-full bg-purple-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+          友
         </div>
       )}
       <div

@@ -9,6 +9,12 @@ interface IPlayerHandProps {
   trumpRank?: string; // 当前级牌点数
   trumpSuit?: string; // 主牌花色
   gameStatus?: string; // 游戏状态
+  friendCard?: {
+    suit: string;
+    value: string;
+    position: number;
+    count: number;
+  }; // 盟友牌信息
 }
 
 export default function PlayerHand({
@@ -17,6 +23,7 @@ export default function PlayerHand({
   trumpRank,
   trumpSuit,
   gameStatus,
+  friendCard,
 }: IPlayerHandProps) {
   const { selectedCardIndices, toggleCard, setCardCount } = useGameStore();
   const prevCount = useRef(cards.length);
@@ -65,25 +72,44 @@ export default function PlayerHand({
     return isTrumpCard(card);
   };
 
+  // 判断卡片是否可用
+  const isCardDisabled = (_index: number): boolean => {
+    //：所有玩家都可以 叫庄阶段选择级牌
+    if (gameStatus === 'calling') return false;
+    // 出牌阶段暂时不限制，任何牌都可以出
+    return false;
+  };
+
+  // 判断是否是盟友牌
+  const isFriendCard = (card: ICard): boolean => {
+    if (!friendCard) return false;
+    return card.suit === friendCard.suit && card.value === friendCard.value;
+  };
+
   return (
     <div className="flex flex-wrap items-end justify-center gap-1">
-      {cards.map((card, i) => (
-        <div
-          key={`${card.suit}-${card.value}-${i}`}
-          className="animate-card-deal"
-          style={{ animationDelay: `${i * 30}ms` }}
-        >
-          <PlayingCard
-            card={card}
-            selected={selectedCardIndices.has(i)}
-            onClick={interactive ? () => toggleCard(i) : undefined}
-            size="md"
-            isTrumpRank={shouldHighlightTrumpRank(card)}
-            isTrump={shouldHighlightTrump(card)}
-            showTrumpLabel={shouldShowTrumpLabel(card)}
-          />
-        </div>
-      ))}
+      {cards.map((card, i) => {
+        const disabled = isCardDisabled(i);
+        const isFriend = isFriendCard(card);
+        return (
+          <div
+            key={`${card.suit}-${card.value}-${i}`}
+            className={`animate-card-deal ${disabled ? 'opacity-40' : ''}`}
+            style={{ animationDelay: `${i * 30}ms` }}
+          >
+            <PlayingCard
+              card={card}
+              selected={selectedCardIndices.has(i)}
+              onClick={interactive && !disabled ? () => toggleCard(i) : undefined}
+              size="md"
+              isTrumpRank={shouldHighlightTrumpRank(card)}
+              isTrump={shouldHighlightTrump(card)}
+              showTrumpLabel={shouldShowTrumpLabel(card)}
+              isFriend={isFriend}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

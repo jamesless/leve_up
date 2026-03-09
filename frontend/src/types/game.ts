@@ -48,9 +48,20 @@ export interface IGameState {
   // 叫庄相关
   dealerSeat?: number;
   callPhase?: string;
+  callCountdown?: number;
   currentCaller?: number;
   callRecords?: ICallRecord[];
+  passedSeats?: number[];
   flippedBottomCards?: ICard[];
+  // 叫朋友相关
+  hostCalledCard?: {
+    suit: string;
+    value: string;
+    position: number;
+    count: number;
+  };
+  friendRevealed?: boolean;
+  friendSeat?: number;
   // 发牌相关
   dealtCardCount?: number;
   totalCardsPerPlayer?: number;

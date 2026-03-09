@@ -184,6 +184,17 @@ export function useCallDealer(gameId: string) {
   });
 }
 
+export function usePassCall(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gameService.passCall(gameId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
+  });
+}
+
 export function useDiscardBottomCards(gameId: string) {
   const queryClient = useQueryClient();
 

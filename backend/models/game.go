@@ -390,13 +390,13 @@ func GetTableGame(gameID string) (*GameTable, error) {
 			},
 		})
 
-		// 单人模式：直接进入找朋友阶段
+		// 确认庄家后，进入下一阶段
 		if isSinglePlayerGame(table) {
 			return finalizeDealerAndStartPlaying(table)
 		}
 
-		table.UpdatedAt = time.Now()
-		activeGames[gameID] = table
+		// 多人模式：也进入找朋友阶段
+		return finalizeDealerAndStartPlaying(table)
 	}
 
 	return table, nil
@@ -1508,12 +1508,70 @@ func DealCards(playerCount int) ([][]Card, []Card) {
 
 	for i := 0; i < playerCount; i++ {
 		hands[i] = allCards[i*cardsPerPlayer : (i+1)*cardsPerPlayer]
+		// 排序：按花色从左到右，从小到大
+		hands[i] = sortCards(hands[i])
 	}
 
-	// Remaining 7 cards are the bottom cards
+	// 底牌也排序
 	bottomCards := allCards[playerCount*cardsPerPlayer:]
+	bottomCards = sortCards(bottomCards)
 
 	return hands, bottomCards
+}
+
+// sortCards sorts cards by suit then by value
+// 花色顺序: hearts < diamonds < clubs < spades < joker
+// 点数顺序: 2 < 3 < 4 < ... < A < small < big
+func sortCards(cards []Card) []Card {
+	suitOrder := map[string]int{
+		"hearts":   0,
+		"diamonds": 1,
+		"clubs":    2,
+		"spades":   3,
+		"joker":    4,
+	}
+	valueOrder := map[string]int{
+		"2":     0,
+		"3":     1,
+		"4":     2,
+		"5":     3,
+		"6":     4,
+		"7":     5,
+		"8":     6,
+		"9":     7,
+		"10":    8,
+		"J":     9,
+		"Q":     10,
+		"K":     11,
+		"A":     12,
+		"small": 13,
+		"big":   14,
+	}
+
+	sorted := make([]Card, len(cards))
+	copy(sorted, cards)
+
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			si := suitOrder[sorted[i].Suit]
+			sj := suitOrder[sorted[j].Suit]
+			if si > sj {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+				continue
+			}
+			if si < sj {
+				continue
+			}
+			// 同花色，按点数排序
+			vi := valueOrder[sorted[i].Value]
+			vj := valueOrder[sorted[j].Value]
+			if vi > vj {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	return sorted
 }
 
 // CalculateLevelUp determines how many levels to advance based on score
@@ -3286,8 +3344,8 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 		return nil, fmt.Errorf("玩家不在游戏中")
 	}
 
-	if table.CallPhase != "counting" {
-		return nil, fmt.Errorf("不在叫庄倒计时阶段")
+	if table.CallPhase != "counting" && table.CallPhase != "dealing" {
+		return nil, fmt.Errorf("不在叫庄倒计时或发牌阶段")
 	}
 
 	// 检查玩家是否已经叫过庄

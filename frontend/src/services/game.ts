@@ -33,6 +33,9 @@ export const callFriend = (id: string, suit: string, value: string, position = 1
 export const callDealer = (id: string, cardIndices: number[]) =>
   post<IGameResponse>(`/game/${id}/call-dealer`, { cardIndices });
 
+export const passCall = (id: string) =>
+  post<IGameResponse>(`/game/${id}/pass-call`, {});
+
 export const flipBottomCard = (id: string) =>
   post<IGameResponse>(`/game/${id}/flip-bottom`);
 

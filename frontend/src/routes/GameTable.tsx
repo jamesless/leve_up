@@ -14,6 +14,7 @@ import {
   useAiPlay,
   useStartSinglePlayerGame,
   useCallDealer,
+  usePassCall,
   useDiscardBottomCards,
   useCallFriend,
   useJoinGame,
@@ -25,9 +26,26 @@ import {
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
 import { EGameStatus, ECardSuit } from '@/types';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 
 const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
+
+// 花色符号映射
+const SUIT_SYMBOLS: Record<string, string> = {
+  hearts: '♥',
+  diamonds: '♦',
+  clubs: '♣',
+  spades: '♠',
+  joker: 'Joker',
+};
+
+// 获取花色显示类名
+const getSuitClass = (suit: string): string => {
+  if (suit === 'hearts' || suit === 'diamonds') return 'text-red-600';
+  if (suit === 'clubs' || suit === 'spades') return 'text-slate-900';
+  if (suit === 'joker') return 'text-purple-600';
+  return 'text-slate-900';
+};
 
 export default function GameTable() {
   const { id } = useParams<{ id: string }>();
@@ -43,6 +61,7 @@ export default function GameTable() {
   const passTurn = usePassTurn(gameId);
   const aiPlay = useAiPlay(gameId);
   const callDealerMutation = useCallDealer(gameId);
+  const passCallMutation = usePassCall(gameId);
   const discardMutation = useDiscardBottomCards(gameId);
   const callFriendMutation = useCallFriend(gameId);
   const startSinglePlayerMutation = useStartSinglePlayerGame(gameId);
@@ -51,7 +70,7 @@ export default function GameTable() {
   const cancelReadyMutation = useCancelReady(gameId);
   const { data: readyStatusData } = useReadyStatus(gameId);
   const dealNextCardMutation = useDealNextCard(gameId);
-  const dealingIntervalRef = useRef<number | null>(null);
+  const dealingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasTriggeredAutoStartRef = useRef(false);
   const hasAttemptedJoinRef = useRef(false);
   const lastAITurnRef = useRef<number | null>(null);
@@ -84,17 +103,32 @@ export default function GameTable() {
   useEffect(() => {
     if (!game) return;
     if (game.status === EGameStatus.CALLING) {
-      setShowCallDialog(true);
+      // 检查玩家是否已经叫过庄或选择不叫
+      const mySeat = game.myPosition;
+      const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
+      const hasPassed = game.passedSeats?.includes(mySeat);
+      const isFinished = game.callPhase === 'finished';
+      // 只有在玩家还没有做出选择且阶段未结束时才显示对话框
+      if (!hasCalled && !hasPassed && !isFinished) {
+        setShowCallDialog(true);
+      } else {
+        setShowCallDialog(false);
+      }
     } else if (game.status === EGameStatus.DISCARDING) {
       setShowDiscardDialog(true);
     } else if (game.status === EGameStatus.CALLING_FRIEND) {
-      setShowCallFriendDialog(true);
+      // 只有庄家才会自动弹出叫朋友对话框
+      if (game.dealerSeat === game.myPosition) {
+        setShowCallFriendDialog(true);
+      } else {
+        setShowCallFriendDialog(false);
+      }
     } else {
       setShowCallDialog(false);
       setShowDiscardDialog(false);
       setShowCallFriendDialog(false);
     }
-  }, [game?.status]);
+  }, [game?.status, game?.callRecords, game?.passedSeats, game?.callPhase, game?.myPosition]);
 
   // 自动加入游戏（如果尚未加入）
   useEffect(() => {
@@ -193,8 +227,22 @@ export default function GameTable() {
 
   const otherPlayers = game.players.filter(player => player.position !== game.myPosition);
 
+  // 计算当前需要出的牌数量
+  const requiredCardCount = useMemo(() => {
+    if (!game.currentTrick || game.currentTrick.length === 0) {
+      return 1; // 第一个出牌，只需要1张
+    }
+    // 获取第一家的牌数作为需要跟的牌数
+    return game.currentTrick[0]?.cards?.length || 1;
+  }, [game?.currentTrick]);
+
   const handlePlay = () => {
     if (selectedCardIndices.size === 0) return;
+    // 验证选择的牌数量是否正确
+    if (selectedCardIndices.size !== requiredCardCount) {
+      alert(`请选择恰好 ${requiredCardCount} 张牌！`);
+      return;
+    }
     playCards.mutate(
       { cardIndices: Array.from(selectedCardIndices) },
       { onSuccess: () => clearSelection() },
@@ -279,6 +327,18 @@ export default function GameTable() {
               主牌: {game.trumpSuit === 'hearts' ? '红桃' : game.trumpSuit === 'diamonds' ? '方片' : game.trumpSuit === 'clubs' ? '梅花' : game.trumpSuit === 'spades' ? '黑桃' : game.trumpSuit}
             </Badge>
           )}
+          {game.hostCalledCard && (
+            <Badge variant="outline" className="gap-1 bg-purple-950/50 border-purple-500 text-purple-200">
+              <span className="text-purple-300">🎯 盟友牌:</span>{' '}
+              <span className={getSuitClass(game.hostCalledCard.suit)}>
+                {SUIT_SYMBOLS[game.hostCalledCard.suit]}
+              </span>{' '}
+              <span className="font-bold">{game.hostCalledCard.value}</span>
+              <span className="text-purple-400 ml-1">
+                (打出第{game.hostCalledCard.position}张时亮明身份)
+              </span>
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -305,9 +365,12 @@ export default function GameTable() {
                     {played.cards.map((card, j) => (
                       <div
                         key={j}
-                        className="flex h-10 w-7 items-center justify-center rounded border border-slate-400 bg-white text-xs font-bold"
+                        className="flex h-10 w-8 flex-col items-center justify-center rounded border border-slate-400 bg-white text-xs font-bold"
                       >
-                        <span className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-slate-900'}>
+                        <span className={getSuitClass(card.suit)}>
+                          {SUIT_SYMBOLS[card.suit] || ''}
+                        </span>
+                        <span className={getSuitClass(card.suit)}>
                           {card.value}
                         </span>
                       </div>
@@ -326,6 +389,7 @@ export default function GameTable() {
           trumpRank={game.trumpRank}
           trumpSuit={game.trumpSuit ?? undefined}
           gameStatus={game.status}
+          friendCard={game.hostCalledCard}
         />
 
         {/* 叫庄对话框 */}
@@ -477,14 +541,48 @@ export default function GameTable() {
 
           <div className="flex flex-col gap-3">
             {game.status === EGameStatus.CALLING && !showCallDialog && (
-              <Button
-                variant="game"
-                size="lg"
-                className="gap-2 text-base font-bold"
-                onClick={() => setShowCallDialog(true)}
-              >
-                叫庄
-              </Button>
+              <>
+                {/* 判断当前玩家是否已经叫过庄 */}
+                {(() => {
+                  const mySeat = game.myPosition;
+                  const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
+                  const hasPassed = game.passedSeats?.includes(mySeat);
+                  const hasSomeoneCalled = (game.callRecords?.length ?? 0) > 0;
+                  const isFinished = game.callPhase === 'finished';
+
+                  // 如果已经叫过庄或已结束，不显示叫庄按钮
+                  if (hasCalled || isFinished) {
+                    return null;
+                  }
+
+                  return (
+                    <>
+                      {/* 叫庄/抢庄按钮 */}
+                      <Button
+                        variant="game"
+                        size="lg"
+                        className="gap-2 text-base font-bold"
+                        onClick={() => setShowCallDialog(true)}
+                        disabled={hasPassed}
+                      >
+                        {hasSomeoneCalled ? '抢庄' : '叫庄'}
+                      </Button>
+                      {/* 不叫按钮 - 如果还没选择不叫 */}
+                      {!hasPassed && (
+                        <Button
+                          variant="outline"
+                          size="lg"
+                          className="gap-2 text-base"
+                          onClick={() => passCallMutation.mutate()}
+                          disabled={passCallMutation.isPending}
+                        >
+                          不叫
+                        </Button>
+                      )}
+                    </>
+                  );
+                })()}
+              </>
             )}
             {game.status === EGameStatus.DISCARDING && !showDiscardDialog && (
               <Button
@@ -497,26 +595,34 @@ export default function GameTable() {
               </Button>
             )}
             {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
-              <Button
-                variant="game"
-                size="lg"
-                className="gap-2 text-base font-bold"
-                onClick={() => setShowCallFriendDialog(true)}
-              >
-                叫朋友
-              </Button>
+              <>
+                {game.dealerSeat === game.myPosition ? (
+                  <Button
+                    variant="game"
+                    size="lg"
+                    className="gap-2 text-base font-bold"
+                    onClick={() => setShowCallFriendDialog(true)}
+                  >
+                    叫朋友
+                  </Button>
+                ) : (
+                  <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-4 text-center">
+                    <p className="text-amber-200">请等待庄家选择花色</p>
+                  </div>
+                )}
+              </>
             )}
-            {game.status === EGameStatus.PLAYING && (
+            {game.status === EGameStatus.PLAYING && game.currentPlayer === game.myPosition && (
               <>
                 <Button
                   variant="game"
                   size="lg"
                   className="gap-2 text-base font-bold"
                   onClick={handlePlay}
-                  disabled={selectedCardIndices.size === 0 || playCards.isPending}
+                  disabled={selectedCardIndices.size !== requiredCardCount || playCards.isPending}
                 >
                   {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-                  出牌 ({selectedCardIndices.size})
+                  出牌 ({selectedCardIndices.size}/{requiredCardCount})
                 </Button>
                 <Button
                   variant="outline"
@@ -529,6 +635,11 @@ export default function GameTable() {
                   不出
                 </Button>
               </>
+            )}
+            {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (
+              <div className="rounded-lg border-2 border-blue-500/30 bg-blue-950/20 p-4 text-center">
+                <p className="text-blue-200">等待其他玩家出牌...</p>
+              </div>
             )}
           </div>
           {selectedCardIndices.size > 0 && game.status === EGameStatus.PLAYING && (
