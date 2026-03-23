@@ -1,5 +1,5 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft, Play, SkipForward, Film } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, SkipForward, Film, ChevronUp, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
@@ -25,7 +25,7 @@ import {
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
-import { EGameStatus, ECardSuit } from '@/types';
+import { EGameStatus, ECardSuit, type ICard } from '@/types';
 import { useEffect, useRef, useState, useMemo } from 'react';
 
 const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
@@ -76,6 +76,12 @@ export default function GameTable() {
   const lastAITurnRef = useRef<number | null>(null);
   const game = data?.game;
 
+  // 计算当前需要出的牌数量 - 已移除数量限制，出牌只需选择任意数量的同花色牌
+  const requiredCardCount = useMemo(() => {
+    // 不再限制出牌数量，用户可以选择任意数量的牌
+    return 0; // 0 表示不限制
+  }, [game?.currentTrick]);
+
   // DEBUG: Log game data
   useEffect(() => {
     if (game) {
@@ -90,6 +96,7 @@ export default function GameTable() {
   const [showCallDialog, setShowCallDialog] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
+  const [showHand, setShowHand] = useState(true); // 控制手牌显示/隐藏
 
   useEffect(() => {
     if (!isSinglePlayerRoute || hasTriggeredAutoStartRef.current) return;
@@ -115,7 +122,12 @@ export default function GameTable() {
         setShowCallDialog(false);
       }
     } else if (game.status === EGameStatus.DISCARDING) {
-      setShowDiscardDialog(true);
+      // 只有庄家才能扣牌
+      if (game.dealerSeat === game.myPosition) {
+        setShowDiscardDialog(true);
+      } else {
+        setShowDiscardDialog(false);
+      }
     } else if (game.status === EGameStatus.CALLING_FRIEND) {
       // 只有庄家才会自动弹出叫朋友对话框
       if (game.dealerSeat === game.myPosition) {
@@ -227,22 +239,9 @@ export default function GameTable() {
 
   const otherPlayers = game.players.filter(player => player.position !== game.myPosition);
 
-  // 计算当前需要出的牌数量
-  const requiredCardCount = useMemo(() => {
-    if (!game.currentTrick || game.currentTrick.length === 0) {
-      return 1; // 第一个出牌，只需要1张
-    }
-    // 获取第一家的牌数作为需要跟的牌数
-    return game.currentTrick[0]?.cards?.length || 1;
-  }, [game?.currentTrick]);
-
   const handlePlay = () => {
     if (selectedCardIndices.size === 0) return;
-    // 验证选择的牌数量是否正确
-    if (selectedCardIndices.size !== requiredCardCount) {
-      alert(`请选择恰好 ${requiredCardCount} 张牌！`);
-      return;
-    }
+    // 不再限制出牌数量，用户可以选择任意数量的牌
     playCards.mutate(
       { cardIndices: Array.from(selectedCardIndices) },
       { onSuccess: () => clearSelection() },
@@ -383,14 +382,37 @@ export default function GameTable() {
         </div>
       </div>
 
-      <div className="border-t border-border/40 bg-background/95 p-4">
-        <PlayerHand
-          cards={game.myHand}
-          trumpRank={game.trumpRank}
-          trumpSuit={game.trumpSuit ?? undefined}
-          gameStatus={game.status}
-          friendCard={game.hostCalledCard}
-        />
+      {/* 手牌区域 - 手机端可折叠 */}
+      <div className="border-t border-border/40 bg-background/95">
+        {/* 折叠按钮 */}
+        <button
+          onClick={() => setShowHand(!showHand)}
+          className="w-full py-2 flex items-center justify-center gap-2 bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+        >
+          {showHand ? (
+            <EyeOff className="w-4 h-4" />
+          ) : (
+            <Eye className="w-4 h-4" />
+          )}
+          <span>{showHand ? '隐藏手牌' : '查看手牌'}</span>
+          <span className="text-xs bg-slate-600 px-2 py-0.5 rounded">{game.myHand?.length || 0} 张</span>
+        </button>
+
+        {/* 手牌区域 - 当有对话框或点击展开时显示 */}
+        {(showHand || showCallDialog || showDiscardDialog || showCallFriendDialog) && (
+          <div className="p-4 pb-2 overflow-x-auto">
+            <div className="min-w-max">
+              <PlayerHand
+                cards={game.myHand}
+                trumpRank={game.trumpRank}
+                trumpSuit={game.trumpSuit ?? undefined}
+                gameStatus={game.status}
+                friendCard={game.hostCalledCard}
+                size="sm"
+              />
+            </div>
+          </div>
+        )}
 
         {/* 叫庄对话框 */}
         {showCallDialog && (
@@ -420,6 +442,7 @@ export default function GameTable() {
             onSubmit={handleCallFriend}
             isPending={callFriendMutation.isPending}
             currentLevel={game.currentLevel}
+            playerHand={game.myHand}
           />
         )}
 
@@ -584,7 +607,7 @@ export default function GameTable() {
                 })()}
               </>
             )}
-            {game.status === EGameStatus.DISCARDING && !showDiscardDialog && (
+            {game.status === EGameStatus.DISCARDING && game.dealerSeat === game.myPosition && !showDiscardDialog && (
               <Button
                 variant="game"
                 size="lg"
@@ -593,6 +616,11 @@ export default function GameTable() {
               >
                 扣牌
               </Button>
+            )}
+            {game.status === EGameStatus.DISCARDING && game.dealerSeat !== game.myPosition && (
+              <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-4 text-center">
+                <p className="text-amber-200">等待庄家扣牌...</p>
+              </div>
             )}
             {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
               <>
@@ -619,10 +647,10 @@ export default function GameTable() {
                   size="lg"
                   className="gap-2 text-base font-bold"
                   onClick={handlePlay}
-                  disabled={selectedCardIndices.size !== requiredCardCount || playCards.isPending}
+                  disabled={selectedCardIndices.size === 0 || playCards.isPending}
                 >
                   {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-                  出牌 ({selectedCardIndices.size}/{requiredCardCount})
+                  出牌 ({selectedCardIndices.size})
                 </Button>
                 <Button
                   variant="outline"
@@ -634,6 +662,11 @@ export default function GameTable() {
                   {passTurn.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <SkipForward className="h-5 w-5" />}
                   不出
                 </Button>
+                {passTurn.isError && (
+                  <p className="mt-2 text-center text-sm text-red-400">
+                    操作失败，请重试
+                  </p>
+                )}
               </>
             )}
             {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (

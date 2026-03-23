@@ -898,13 +898,20 @@ func GetGameTableHandler(c *gin.Context) {
 	// 如果游戏还在等待状态，从数据库获取玩家列表
 	if table.Status == "waiting" {
 		game, err := models.GetGame(gameID)
+		// 获取所有玩家的准备状态
+		readyStates, _ := models.GetPlayersReadyStatus(gameID)
+		readyMap := make(map[string]bool)
+		for _, rs := range readyStates {
+			readyMap[rs.UserID] = rs.IsReady
+		}
+
 		if err == nil {
 			for i, playerID := range game.PlayerIDs {
 				var username string
 				var isAI bool
 
 				var level string = "2" // 默认等级
-			if strings.HasPrefix(playerID, "ai_") {
+				if strings.HasPrefix(playerID, "ai_") {
 					isAI = true
 					// Extract AI number from playerID
 					aiNum := strings.TrimPrefix(playerID, "ai_")
@@ -916,12 +923,15 @@ func GetGameTableHandler(c *gin.Context) {
 					username = fmt.Sprintf("玩家%d", i+1)
 				}
 
+				// 从准备状态映射中获取真实的准备状态
+				isReady := readyMap[playerID]
+
 				playerInfo := map[string]interface{}{
 					"id":        i + 1,
 					"userId":    playerID,
 					"position":  i + 1,
 					"username":  username,
-					"isReady":   false,
+					"isReady":   isReady,
 					"isAI":      isAI,
 					"cardCount": 0,
 					"isFriend":  false,

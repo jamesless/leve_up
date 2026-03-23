@@ -2772,22 +2772,8 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 		}
 	}
 
-	leadCardCount := len(leadCards)
-
-	// Must play same number of cards
-	if len(cards) != leadCardCount {
-		return fmt.Errorf("must play %d cards", leadCardCount)
-	}
-
-	// Determine lead play type
-	isLeadPair := leadCardCount == 2 && leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit
-	isLeadTriple := leadCardCount == 3 && leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value && leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit
-	isLeadTractor := isTractorWithContext(leadCards, table.TrumpSuit, table.TrumpRank)
-
-	// Check if player's cards form a pair/triple
-	isPlayerPair := leadCardCount == 2 && cards[0].Value == cards[1].Value && cards[0].Suit == cards[1].Suit
-	isPlayerTriple := leadCardCount == 3 && cards[0].Value == cards[1].Value && cards[1].Value == cards[2].Value && cards[0].Suit == cards[1].Suit && cards[1].Suit == cards[2].Suit
-	isPlayerTractor := isTractorWithContext(cards, table.TrumpSuit, table.TrumpRank)
+	// 不再限制出牌数量，只要同花色即可任意出多张
+	// 只要选择了至少一张牌就可以
 
 	// 检查玩家是否有领出花色的牌
 	// 注意：级牌属于主牌，不属于其原花色
@@ -2803,80 +2789,15 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 		}
 	}
 
-	// 跟牌规则优先级：
-	// 1. 有色必须跟色：相同牌型、相同数量
+	// 新规则：只要是同花色就可以任意出多张
 	if hasLeadSuit {
-		if isLeadPair && isPlayerPair {
-			return nil // 相同牌型、相同花色
-		}
-		if isLeadTriple && isPlayerTriple {
-			return nil // 相同牌型、相同花色
-		}
-		if isLeadTractor && isPlayerTractor {
-			return nil // 拖拉机配拖拉机
-		}
-
-		// 2. 当领出三张时，允许对子+单张的形式
-		if isLeadTriple && !isPlayerTriple {
-			// 如果玩家打出的牌包含对子，这是合法的"对子+单张"形式
-			if hasPairInSuit(cards, leadSuit, table.TrumpRank) {
-				return nil // 对子+单张是合法的跟牌形式
-			}
-		}
-
-		// 3. 当领出对子时，如果玩家打出的不是对子，检查是否有对子必须跟
-		if isLeadPair && !isPlayerPair {
-			// 检查玩家打出的牌中是否有对子
-			if hasPairInSuit(cards, leadSuit, table.TrumpRank) {
-				return fmt.Errorf("有相同花色的对子，必须跟对子")
-			}
-		}
-
-		// 4. 相同花色的单张
-		return validateSingleSuitFollow(cards, leadSuit, table.TrumpRank)
+		// 有领出花色的牌，直接返回成功
+		// 不再限制牌型或数量
+		return nil
 	}
 
-	// 4. 无色时：主牌杀（牌型必须完美匹配）
-	// 新规则：王是主牌的一部分
-	trumpSuit := table.TrumpSuit
-	if trumpSuit != "" {
-		// 检查是否使用主牌（包括王）
-		allTrump := true
-		for _, card := range cards {
-			// 王是主牌的一部分
-			if card.Type == "joker" {
-				continue // 王是主牌
-			}
-			if card.Suit != trumpSuit {
-				allTrump = false
-				break
-			}
-		}
-
-		if allTrump {
-			// 主牌杀：牌型必须完美匹配
-			if isLeadPair && isPlayerPair {
-				return nil // 主牌对子杀成功
-			}
-			if isLeadTriple && isPlayerTriple {
-				return nil // 主牌三张杀成功
-			}
-			if isLeadTractor && isPlayerTractor {
-				return nil // 主牌拖拉机杀成功
-			}
-			// 如果领出的是甩牌（多张同花色但不成对子/拖拉机）
-			// 主牌也必须出同样数量和牌型
-			if !isLeadPair && !isLeadTriple && !isLeadTractor {
-				// 检查玩家的主牌是否也不是对子/拖拉机（单张组合）
-				if !isPlayerPair && !isPlayerTriple && !isPlayerTractor {
-					return nil // 主牌单张组合杀成功
-				}
-			}
-			return fmt.Errorf("主牌杀必须牌型匹配")
-		}
-	}
-
-	// 5. 垫任意其他牌
+	// 无领出花色时：可以用主牌（包括王）或垫其他牌
+	// 不再限制牌型或数量
 	return nil
 }
 

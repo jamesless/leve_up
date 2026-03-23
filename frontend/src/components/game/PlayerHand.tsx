@@ -1,7 +1,8 @@
 import PlayingCard from './PlayingCard';
 import { useGameStore } from '@/store/gameStore';
 import type { ICard } from '@/types';
-import { useEffect, useRef } from 'react';
+import { ECardSuit } from '@/types';
+import { useEffect, useRef, useMemo } from 'react';
 
 interface IPlayerHandProps {
   cards: ICard[];
@@ -15,6 +16,7 @@ interface IPlayerHandProps {
     position: number;
     count: number;
   }; // 盟友牌信息
+  size?: 'sm' | 'md' | 'lg'; // 牌的大小
 }
 
 export default function PlayerHand({
@@ -24,9 +26,71 @@ export default function PlayerHand({
   trumpSuit,
   gameStatus,
   friendCard,
+  size = 'md',
 }: IPlayerHandProps) {
   const { selectedCardIndices, toggleCard, setCardCount } = useGameStore();
   const prevCount = useRef(cards.length);
+
+  // 理牌函数：主牌单独放一堆，其他牌红黑交错
+  const sortCards = (cards: ICard[]): ICard[] => {
+    // 判断是否是主牌
+    const isTrumpCard = (card: ICard): boolean => {
+      if (!trumpSuit || !trumpRank) return false;
+      if (card.suit === 'joker') return true;
+      if (card.value === trumpRank) return true;
+      if (card.suit === trumpSuit) return true;
+      return false;
+    };
+
+    // 非主牌的花色排序（红黑交错）
+    const suitOrder: Record<string, number> = {
+      [ECardSuit.SPADES]: 0,   // 黑桃 - 黑色
+      [ECardSuit.HEARTS]: 1,   // 红桃 - 红色
+      [ECardSuit.CLUBS]: 2,    // 梅花 - 黑色
+      [ECardSuit.DIAMONDS]: 3, // 方片 - 红色
+    };
+    const valueOrder: Record<string, number> = {
+      '2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8,
+      'J': 9, 'Q': 10, 'K': 11, 'A': 12, 'small': 13, 'big': 14,
+    };
+
+    return [...cards].sort((a, b) => {
+      const aIsTrump = isTrumpCard(a);
+      const bIsTrump = isTrumpCard(b);
+
+      // 主牌放在最前面
+      if (aIsTrump && !bIsTrump) return -1;
+      if (!aIsTrump && bIsTrump) return 1;
+
+      // 都是主牌：级牌最大优先排前面，然后按花色排序，再按点数排序（从大到小）
+      if (aIsTrump && bIsTrump) {
+        const aIsTrumpRank = a.value === trumpRank;
+        const bIsTrumpRank = b.value === trumpRank;
+
+        // 级牌优先
+        if (aIsTrumpRank && !bIsTrumpRank) return -1;
+        if (!aIsTrumpRank && bIsTrumpRank) return 1;
+
+        const suitDiff = (suitOrder[a.suit] ?? 4) - (suitOrder[b.suit] ?? 4);
+        if (suitDiff !== 0) return suitDiff;
+        return valueOrder[b.value] - valueOrder[a.value];
+      }
+
+      // 都是非主牌：红黑交错排序（从大到小）
+      const suitDiff = suitOrder[a.suit] - suitOrder[b.suit];
+      if (suitDiff !== 0) return suitDiff;
+      return valueOrder[b.value] - valueOrder[a.value];
+    });
+  };
+
+  // 排序后的手牌（用于显示），保持原始索引用于选牌
+  const sortedCards = useMemo(() => sortCards(cards), [cards]);
+
+  // 创建排序后索引到原始索引的映射
+  const sortedToOriginalIndex = useMemo(() => {
+    const sorted = sortCards([...cards.map((c, i) => ({ ...c, _origIndex: i }))]);
+    return sorted.map(card => (card as ICard & { _origIndex: number })._origIndex);
+  }, [cards]);
 
   useEffect(() => {
     if (cards.length !== prevCount.current) {
@@ -87,8 +151,8 @@ export default function PlayerHand({
   };
 
   return (
-    <div className="flex flex-wrap items-end justify-center gap-1">
-      {cards.map((card, i) => {
+    <div className="flex flex-wrap items-end justify-start gap-1">
+      {sortedCards.map((card, i) => {
         const disabled = isCardDisabled(i);
         const isFriend = isFriendCard(card);
         return (
@@ -99,9 +163,9 @@ export default function PlayerHand({
           >
             <PlayingCard
               card={card}
-              selected={selectedCardIndices.has(i)}
-              onClick={interactive && !disabled ? () => toggleCard(i) : undefined}
-              size="md"
+              selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
+              onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
+              size={size}
               isTrumpRank={shouldHighlightTrumpRank(card)}
               isTrump={shouldHighlightTrump(card)}
               showTrumpLabel={shouldShowTrumpLabel(card)}
