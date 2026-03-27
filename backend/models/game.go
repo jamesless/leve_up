@@ -84,6 +84,10 @@ type GameTable struct {
 
 	// 上一局结果（用于确定下一局起始发牌人）
 	PreviousResult *PreviousGameResult `json:"previousResult,omitempty"` // 上一局结果
+
+	// 甩牌失败高亮显示
+	ThrowBlocker     int    `json:"throwBlocker,omitempty"`     // 让甩牌失败的玩家座位号（用于高亮显示）
+	ThrowBlockerCard string `json:"throwBlockerCard,omitempty"` // 让甩牌失败的牌描述
 }
 
 // PreviousGameResult 记录上一局的结果，用于确定下一局的起始发牌人
@@ -296,7 +300,7 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 		table.DealingPhase = "finished"
 		table.Status = "calling"
 		table.CallPhase = "counting"
-		table.CallCountdown = 30 // 30秒倒计时（根据规则）
+		table.CallCountdown = 10 // 10秒倒计时（根据规则）
 		table.UpdatedAt = time.Now()
 		activeGames[gameID] = table
 
@@ -624,6 +628,10 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
+
+		// 当轮结束，清除甩牌失败高亮
+		table.ThrowBlocker = 0
+		table.ThrowBlockerCard = ""
 
 		// Collect scoring cards
 		var collectedCards []Card
@@ -1865,6 +1873,10 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 		result.TrickComplete = true
 		result.TrickWinner = winner
 
+		// 当轮结束，清除甩牌失败高亮
+		table.ThrowBlocker = 0
+		table.ThrowBlockerCard = ""
+
 		// Collect scoring cards
 		var collectedCards []Card
 		for _, pc := range table.CurrentTrick {
@@ -1948,12 +1960,23 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		throwResult := ValidateThrowCards(cardsToPlay, table, playerSeat)
 
 		if !throwResult.IsValid && len(throwResult.ActualPlay) < len(cardsToPlay) {
-			// 甩牌失败，只出最小的牌
-			// 重新计算 cardIndices，只保留要出的牌
+			// 甩牌失败，记录让甩牌失败的玩家（用于高亮显示）
+			table.ThrowBlocker = throwResult.BlockerSeat
+			table.ThrowBlockerCard = throwResult.BlockerCard
+
+			// 找到要出的牌在原手牌中的索引
 			actualCardIndices := make([]int, 0, len(throwResult.ActualPlay))
-			for i, idx := range cardIndices {
-				if i < len(throwResult.ActualPlay) {
-					actualCardIndices = append(actualCardIndices, idx)
+			usedIndices := make(map[int]bool)
+			for _, actualCard := range throwResult.ActualPlay {
+				for i, idx := range cardIndices {
+					if !usedIndices[i] {
+						originalCard := hand.Cards[idx]
+						if originalCard.Suit == actualCard.Suit && originalCard.Value == actualCard.Value {
+							actualCardIndices = append(actualCardIndices, idx)
+							usedIndices[i] = true
+							break
+						}
+					}
 				}
 			}
 			cardIndices = actualCardIndices
@@ -2061,6 +2084,10 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
+
+		// 当轮结束，清除甩牌失败高亮
+		table.ThrowBlocker = 0
+		table.ThrowBlockerCard = ""
 
 		// Collect scoring cards
 		var collectedCards []Card
@@ -2340,10 +2367,15 @@ func validateLeadPlay(cards []Card, table *GameTable) error {
 
 // ThrowCardsResult represents the result of a throw cards validation
 type ThrowCardsResult struct {
-	IsValid       bool   // Whether the throw is valid
-	ActualPlay    []Card // Cards that should actually be played
-	ReturnedCards []Card // Cards that should be returned to hand
-	Reason        string // Reason for failure or success
+	IsValid         bool        // Whether the throw is valid
+	ActualPlay      []Card      // Cards that should actually be played
+	ReturnedCards   []Card      // Cards that should be returned to hand
+	Reason          string      // Reason for failure or success
+	BlockerSeat     int         // 让甩牌失败的玩家座位号（用于高亮显示）
+	BlockerCard     string      // 让甩牌失败的牌（用于显示）
+	CanChoose       bool        // 是否有多种牌型可选
+	ChoiceOptions   []CardGroup // 可选的牌型列表
+	SelectedType    string      // 被选择管上的牌型
 }
 
 // CardGroup represents a group of cards by type
@@ -2389,55 +2421,99 @@ func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCa
 		}
 
 		// 检查该玩家是否能管上任意一种牌型
-		canBeat := make(map[string]bool) // 记录哪些牌型可以被管上
+		canBeat := make(map[string]bool)       // 记录哪些牌型可以被管上
+		blockerCards := make(map[string]string) // 记录用什么牌管上
 
 		for _, group := range groups {
 			switch group.Type {
 			case "triple":
 				// 检查是否有更大的三张
-				if hasLargerTriple(hand.Cards, firstSuit, group.Value) {
+				if largerCard := getLargerTriple(hand.Cards, firstSuit, group.Value); largerCard != "" {
 					canBeat["triple"] = true
+					blockerCards["triple"] = largerCard
 				}
 			case "pair":
 				// 检查是否有更大的对子
-				if hasLargerPair(hand.Cards, firstSuit, group.Value) {
+				if largerCard := getLargerPair(hand.Cards, firstSuit, group.Value); largerCard != "" {
 					canBeat["pair"] = true
+					blockerCards["pair"] = largerCard
 				}
 			case "single":
 				// 检查是否有更大的单张
-				if hasLargerSingle(hand.Cards, firstSuit, group.Value) {
+				if largerCard := getLargerSingle(hand.Cards, firstSuit, group.Value); largerCard != "" {
 					canBeat["single"] = true
+					blockerCards["single"] = largerCard
 				}
 			}
 		}
 
 		// 如果能管上任意一种牌型，甩牌失败
 		if len(canBeat) > 0 {
-			// 选择要留下的最小牌型
-			// 优先级：三张 > 对子 > 单张
-			var keepGroup *CardGroup
+			// 收集被管上的牌型
+			var beatenGroups []CardGroup
 			for _, group := range groups {
-				if !canBeat[group.Type] {
-					if keepGroup == nil || getTypePriority(group.Type) > getTypePriority(keepGroup.Type) {
+				if canBeat[group.Type] {
+					beatenGroups = append(beatenGroups, group)
+				}
+			}
+
+			// 判断是否有多种牌型可选
+			canChoose := len(canBeat) > 1
+
+			// 找出被管上的牌型中最小的牌
+			var keepGroup *CardGroup
+			var selectedType string
+			var blockerCard string
+
+			if canChoose {
+				// 多种牌型被管上，需要玩家选择
+				// 默认选择优先级最低的牌型（单张 > 对子 > 三张）
+				for _, group := range groups {
+					if canBeat[group.Type] {
+						if keepGroup == nil || getTypePriority(group.Type) < getTypePriority(keepGroup.Type) {
+							keepGroup = &group
+							selectedType = group.Type
+							blockerCard = blockerCards[group.Type]
+						}
+					}
+				}
+			} else {
+				// 只有一种牌型被管上，自动处理
+				for _, group := range groups {
+					if canBeat[group.Type] {
 						keepGroup = &group
+						selectedType = group.Type
+						blockerCard = blockerCards[group.Type]
+						break
 					}
 				}
 			}
 
-			// 如果所有牌型都能被管上，选择三张、对子、单张中的最小
-			if keepGroup == nil {
-				for _, group := range groups {
-					if keepGroup == nil || getTypePriority(group.Type) > getTypePriority(keepGroup.Type) {
-						keepGroup = &group
-					}
+			// 找出该牌型中最小的牌
+			smallestGroup := findSmallestGroupOfType(groups, selectedType, table.TrumpSuit, table.TrumpRank)
+			if smallestGroup != nil {
+				keepGroup = smallestGroup
+			}
+
+			// 计算需要收回的牌
+			var returnedCards []Card
+			for _, group := range groups {
+				if group.Value != keepGroup.Value || group.Type != keepGroup.Type {
+					returnedCards = append(returnedCards, group.Cards...)
 				}
 			}
 
 			// 返回结果
 			return &ThrowCardsResult{
-				IsValid:    false,
-				ActualPlay: keepGroup.Cards,
-				Reason:     fmt.Sprintf("玩家%d能管上，只能出%s", seat, describeGroup(*keepGroup)),
+				IsValid:       false,
+				ActualPlay:    keepGroup.Cards,
+				ReturnedCards: returnedCards,
+				Reason:        fmt.Sprintf("玩家%d的%s管上了你的%s", seat, blockerCard, describeGroup(*keepGroup)),
+				BlockerSeat:   seat,
+				BlockerCard:   blockerCard,
+				CanChoose:     canChoose,
+				ChoiceOptions: beatenGroups,
+				SelectedType:  selectedType,
 			}
 		}
 	}
@@ -2500,6 +2576,11 @@ func groupCardsByType(cards []Card) []CardGroup {
 
 // hasLargerTriple checks if hand has larger triple of the same suit
 func hasLargerTriple(handCards []Card, suit, value string) bool {
+	return getLargerTriple(handCards, suit, value) != ""
+}
+
+// getLargerTriple returns the larger triple card value, or empty string if none
+func getLargerTriple(handCards []Card, suit, value string) string {
 	valueCounts := make(map[string]int)
 	for _, card := range handCards {
 		if card.Suit == suit {
@@ -2508,16 +2589,30 @@ func hasLargerTriple(handCards []Card, suit, value string) bool {
 	}
 
 	targetValue := getCardNumericValue(value)
+	var largerValue string
+	var largerNumeric int = -1
 	for v, count := range valueCounts {
-		if count >= 3 && getCardNumericValue(v) > targetValue {
-			return true
+		numericV := getCardNumericValue(v)
+		if count >= 3 && numericV > targetValue {
+			if largerValue == "" || numericV < largerNumeric {
+				largerValue = v
+				largerNumeric = numericV
+			}
 		}
 	}
-	return false
+	if largerValue != "" {
+		return fmt.Sprintf("三张%s%s", getSuitDisplayName(suit), largerValue)
+	}
+	return ""
 }
 
 // hasLargerPair checks if hand has larger pair of the same suit
 func hasLargerPair(handCards []Card, suit, value string) bool {
+	return getLargerPair(handCards, suit, value) != ""
+}
+
+// getLargerPair returns the larger pair card value, or empty string if none
+func getLargerPair(handCards []Card, suit, value string) string {
 	valueCounts := make(map[string]int)
 	for _, card := range handCards {
 		if card.Suit == suit {
@@ -2526,23 +2621,46 @@ func hasLargerPair(handCards []Card, suit, value string) bool {
 	}
 
 	targetValue := getCardNumericValue(value)
+	var largerValue string
+	var largerNumeric int = -1
 	for v, count := range valueCounts {
-		if count >= 2 && getCardNumericValue(v) > targetValue {
-			return true
+		numericV := getCardNumericValue(v)
+		if count >= 2 && numericV > targetValue {
+			if largerValue == "" || numericV < largerNumeric {
+				largerValue = v
+				largerNumeric = numericV
+			}
 		}
 	}
-	return false
+	if largerValue != "" {
+		return fmt.Sprintf("对%s%s", getSuitDisplayName(suit), largerValue)
+	}
+	return ""
 }
 
 // hasLargerSingle checks if hand has larger single of the same suit
 func hasLargerSingle(handCards []Card, suit, value string) bool {
+	return getLargerSingle(handCards, suit, value) != ""
+}
+
+// getLargerSingle returns the larger single card value, or empty string if none
+func getLargerSingle(handCards []Card, suit, value string) string {
 	targetValue := getCardNumericValue(value)
+	var largerValue string
+	var largerNumeric int = -1
 	for _, card := range handCards {
-		if card.Suit == suit && getCardNumericValue(card.Value) > targetValue {
-			return true
+		numericV := getCardNumericValue(card.Value)
+		if card.Suit == suit && numericV > targetValue {
+			if largerValue == "" || numericV < largerNumeric {
+				largerValue = card.Value
+				largerNumeric = numericV
+			}
 		}
 	}
-	return false
+	if largerValue != "" {
+		return fmt.Sprintf("%s%s", getSuitDisplayName(suit), largerValue)
+	}
+	return ""
 }
 
 // getTypePriority returns priority of card type (higher is better)
@@ -2572,6 +2690,25 @@ func describeGroup(group CardGroup) string {
 	default:
 		return "未知牌型"
 	}
+}
+
+// findSmallestGroupOfType finds the smallest group of a specific type
+func findSmallestGroupOfType(groups []CardGroup, cardType, trumpSuit, trumpRank string) *CardGroup {
+	var smallest *CardGroup
+	var smallestValue int = 999
+
+	for i := range groups {
+		group := &groups[i]
+		if group.Type == cardType {
+			value := getCardNumericValue(group.Value)
+			if smallest == nil || value < smallestValue {
+				smallest = group
+				smallestValue = value
+			}
+		}
+	}
+
+	return smallest
 }
 
 // findMinCard finds the card with minimum value in a slice
