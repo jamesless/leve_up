@@ -2,7 +2,8 @@ import PlayingCard from './PlayingCard';
 import { useGameStore } from '@/store/gameStore';
 import type { ICard } from '@/types';
 import { ECardSuit } from '@/types';
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 interface IPlayerHandProps {
   cards: ICard[];
@@ -86,6 +87,35 @@ export default function PlayerHand({
   // 排序后的手牌（用于显示），保持原始索引用于选牌
   const sortedCards = useMemo(() => sortCards(cards), [cards]);
 
+  // 按花色分组（用于移动端标签页）
+  const groupCardsBySuit = useMemo(() => {
+    const groups: Record<string, ICard[]> = {
+      trump: [],
+      spades: [],
+      hearts: [],
+      clubs: [],
+      diamonds: [],
+    };
+
+    sortedCards.forEach(card => {
+      if (isTrumpCard(card)) {
+        groups.trump.push(card);
+      } else if (card.suit === ECardSuit.SPADES) {
+        groups.spades.push(card);
+      } else if (card.suit === ECardSuit.HEARTS) {
+        groups.hearts.push(card);
+      } else if (card.suit === ECardSuit.CLUBS) {
+        groups.clubs.push(card);
+      } else if (card.suit === ECardSuit.DIAMONDS) {
+        groups.diamonds.push(card);
+      }
+    });
+
+    return groups;
+  }, [sortedCards, trumpSuit, trumpRank]);
+
+  const [activeTab, setActiveTab] = useState('trump');
+
   // 创建排序后索引到原始索引的映射
   const sortedToOriginalIndex = useMemo(() => {
     const sorted = sortCards([...cards.map((c, i) => ({ ...c, _origIndex: i }))]);
@@ -151,29 +181,107 @@ export default function PlayerHand({
   };
 
   return (
-    <div className="flex flex-wrap items-end justify-start gap-1">
-      {sortedCards.map((card, i) => {
-        const disabled = isCardDisabled(i);
-        const isFriend = isFriendCard(card);
-        return (
-          <div
-            key={`${card.suit}-${card.value}-${i}`}
-            className={`animate-card-deal ${disabled ? 'opacity-40' : ''}`}
-            style={{ animationDelay: `${i * 30}ms` }}
-          >
-            <PlayingCard
-              card={card}
-              selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
-              onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
-              size={size}
-              isTrumpRank={shouldHighlightTrumpRank(card)}
-              isTrump={shouldHighlightTrump(card)}
-              showTrumpLabel={shouldShowTrumpLabel(card)}
-              isFriend={isFriend}
-            />
-          </div>
-        );
-      })}
-    </div>
+    <>
+      {/* 移动端：标签页布局 */}
+      <div className="md:hidden w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="w-full justify-start overflow-x-auto">
+            {groupCardsBySuit.trump.length > 0 && (
+              <TabsTrigger value="trump" className="relative">
+                主牌 <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.trump.length})</span>
+                {sortedCards.some((c) => isTrumpCard(c) && selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+            {groupCardsBySuit.spades.length > 0 && (
+              <TabsTrigger value="spades" className="relative">
+                ♠ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.spades.length})</span>
+                {groupCardsBySuit.spades.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+            {groupCardsBySuit.hearts.length > 0 && (
+              <TabsTrigger value="hearts" className="relative">
+                ♥ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.hearts.length})</span>
+                {groupCardsBySuit.hearts.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+            {groupCardsBySuit.clubs.length > 0 && (
+              <TabsTrigger value="clubs" className="relative">
+                ♣ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.clubs.length})</span>
+                {groupCardsBySuit.clubs.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+            {groupCardsBySuit.diamonds.length > 0 && (
+              <TabsTrigger value="diamonds" className="relative">
+                ♦ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.diamonds.length})</span>
+                {groupCardsBySuit.diamonds.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+          </TabsList>
+          {Object.entries(groupCardsBySuit).map(([suit, cards]) => (
+            cards.length > 0 && (
+              <TabsContent key={suit} value={suit} className="mt-2">
+                <div className="flex flex-wrap items-end justify-start gap-1">
+                  {cards.map((card) => {
+                    const i = sortedCards.indexOf(card);
+                    const disabled = isCardDisabled(i);
+                    const isFriend = isFriendCard(card);
+                    return (
+                      <div key={`${card.suit}-${card.value}-${i}`} className={disabled ? 'opacity-40' : ''}>
+                        <PlayingCard
+                          card={card}
+                          selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
+                          onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
+                          size="md"
+                          isTrumpRank={shouldHighlightTrumpRank(card)}
+                          isTrump={shouldHighlightTrump(card)}
+                          showTrumpLabel={shouldShowTrumpLabel(card)}
+                          isFriend={isFriend}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+            )
+          ))}
+        </Tabs>
+      </div>
+
+      {/* 桌面端：平铺布局 */}
+      <div className="hidden md:flex flex-wrap items-end justify-start gap-1">
+        {sortedCards.map((card, i) => {
+          const disabled = isCardDisabled(i);
+          const isFriend = isFriendCard(card);
+          return (
+            <div
+              key={`${card.suit}-${card.value}-${i}`}
+              className={`animate-card-deal ${disabled ? 'opacity-40' : ''}`}
+              style={{ animationDelay: `${i * 30}ms` }}
+            >
+              <PlayingCard
+                card={card}
+                selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
+                onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
+                size={size}
+                isTrumpRank={shouldHighlightTrumpRank(card)}
+                isTrump={shouldHighlightTrump(card)}
+                showTrumpLabel={shouldShowTrumpLabel(card)}
+                isFriend={isFriend}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
