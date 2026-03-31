@@ -1987,7 +1987,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 
 	// Validate the play (must be valid combination)
 	fmt.Printf("DEBUG: Validating %d cards: %+v\n", len(cardsToPlay), cardsToPlay)
-	if err := validateCardPlay(cardsToPlay, table); err != nil {
+	if err := validateCardPlay(cardsToPlay, table, hand); err != nil {
 		fmt.Printf("DEBUG: Validation failed: %v\n", err)
 		return nil, err
 	}
@@ -2102,6 +2102,8 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		// Winner gets the cards
 		if winnerHand, ok := table.PlayerHands[winner]; ok {
 			winnerHand.Collected = append(winnerHand.Collected, collectedCards...)
+			// 更新分数
+			winnerHand.Score += pointsCollected
 		}
 
 		// Store all played cards in tricks won
@@ -2295,7 +2297,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 }
 
 // validateCardPlay validates if the selected cards form a valid play
-func validateCardPlay(cards []Card, table *GameTable) error {
+func validateCardPlay(cards []Card, table *GameTable, hand *PlayerHand) error {
 	if len(cards) == 0 {
 		return fmt.Errorf("no cards to play")
 	}
@@ -2307,8 +2309,8 @@ func validateCardPlay(cards []Card, table *GameTable) error {
 		// Leading: can play single card, pair, triple, or tractor
 		return validateLeadPlay(cards, table)
 	} else {
-		// Following: must follow the lead card type
-		return validateFollowPlay(cards, table)
+		// Following: must follow the lead card type and suit
+		return validateFollowPlay(cards, table, hand)
 	}
 }
 
@@ -2367,15 +2369,15 @@ func validateLeadPlay(cards []Card, table *GameTable) error {
 
 // ThrowCardsResult represents the result of a throw cards validation
 type ThrowCardsResult struct {
-	IsValid         bool        // Whether the throw is valid
-	ActualPlay      []Card      // Cards that should actually be played
-	ReturnedCards   []Card      // Cards that should be returned to hand
-	Reason          string      // Reason for failure or success
-	BlockerSeat     int         // 让甩牌失败的玩家座位号（用于高亮显示）
-	BlockerCard     string      // 让甩牌失败的牌（用于显示）
-	CanChoose       bool        // 是否有多种牌型可选
-	ChoiceOptions   []CardGroup // 可选的牌型列表
-	SelectedType    string      // 被选择管上的牌型
+	IsValid       bool        // Whether the throw is valid
+	ActualPlay    []Card      // Cards that should actually be played
+	ReturnedCards []Card      // Cards that should be returned to hand
+	Reason        string      // Reason for failure or success
+	BlockerSeat   int         // 让甩牌失败的玩家座位号（用于高亮显示）
+	BlockerCard   string      // 让甩牌失败的牌（用于显示）
+	CanChoose     bool        // 是否有多种牌型可选
+	ChoiceOptions []CardGroup // 可选的牌型列表
+	SelectedType  string      // 被选择管上的牌型
 }
 
 // CardGroup represents a group of cards by type
@@ -2421,7 +2423,7 @@ func ValidateThrowCards(cards []Card, table *GameTable, playerSeat int) *ThrowCa
 		}
 
 		// 检查该玩家是否能管上任意一种牌型
-		canBeat := make(map[string]bool)       // 记录哪些牌型可以被管上
+		canBeat := make(map[string]bool)        // 记录哪些牌型可以被管上
 		blockerCards := make(map[string]string) // 记录用什么牌管上
 
 		for _, group := range groups {
@@ -2889,7 +2891,7 @@ func getCardNumericValue(value string) int {
 // 3. 相同花色的单张
 // 4. 主牌杀（无色时用主牌，牌型需完美匹配）
 // 5. 垫任意其他牌
-func validateFollowPlay(cards []Card, table *GameTable) error {
+func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error {
 	if len(table.CurrentTrick) == 0 {
 		return fmt.Errorf("no lead to follow")
 	}
@@ -2899,7 +2901,7 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 	leadSuit := leadPlay.Suit
 	leadSeat := table.CurrentTrick[0].Seat
 
-	// Count how many cards the leader played and what type
+	// Get all cards the leader played (in case of multiple cards)
 	leadCards := []Card{}
 	for _, pc := range table.CurrentTrick {
 		if pc.Seat == leadSeat {
@@ -2909,33 +2911,149 @@ func validateFollowPlay(cards []Card, table *GameTable) error {
 		}
 	}
 
-	// 不再限制出牌数量，只要同花色即可任意出多张
-	// 只要选择了至少一张牌就可以
+	// 分析领出的牌型
+	leadCardCount := len(leadCards)
+	leadCardType := analyzeLeadCardType(leadCards)
 
 	// 检查玩家是否有领出花色的牌
 	// 注意：级牌属于主牌，不属于其原花色
-	hasLeadSuit := false
-	for _, card := range cards {
-		// 级牌不算在原花色中（级牌是主牌的一部分）
+	var leadSuitCards []Card // 玩家手中领出花色的牌（不包括级牌）
+	var trumpCards []Card    // 主牌（包括级牌）
+	var otherCards []Card    // 其他花色的牌
+
+	for _, card := range hand.Cards {
+		// 级牌是主牌
 		if card.Value == table.TrumpRank {
-			continue // 跳过级牌
+			trumpCards = append(trumpCards, card)
+			continue
+		}
+		// 王也是主牌
+		if card.Value == "Joker" {
+			trumpCards = append(trumpCards, card)
+			continue
 		}
 		if card.Suit == leadSuit {
-			hasLeadSuit = true
-			break
+			leadSuitCards = append(leadSuitCards, card)
+		} else {
+			otherCards = append(otherCards, card)
 		}
 	}
 
-	// 新规则：只要是同花色就可以任意出多张
-	if hasLeadSuit {
-		// 有领出花色的牌，直接返回成功
-		// 不再限制牌型或数量
-		return nil
+	// 规则1：有领出花色必须跟色
+	if len(leadSuitCards) > 0 {
+		// 必须出领出花色的牌
+		for _, card := range cards {
+			if card.Value == table.TrumpRank || card.Value == "Joker" {
+				continue // 主牌可以用于毙牌
+			}
+			if card.Suit != leadSuit {
+				return fmt.Errorf("must follow lead suit %s, cannot play %s", leadSuit, card.Suit)
+			}
+		}
+
+		// 规则2：跟色情况下牌型必须尽可能接近
+		// 根据领出牌型验证跟随的牌
+		return validateFollowSuit(cards, leadCards, leadCardType, hand.Cards, table.TrumpRank)
 	}
 
-	// 无领出花色时：可以用主牌（包括王）或垫其他牌
-	// 不再限制牌型或数量
+	// 规则3：没有领出花色可以毙牌或垫其他牌
+	// 只检查数量是否匹配
+	if len(cards) != leadCardCount {
+		return fmt.Errorf("must play exactly %d cards, got %d", leadCardCount, len(cards))
+	}
+
 	return nil
+}
+
+// analyzeLeadCardType 分析领出牌型
+func analyzeLeadCardType(leadCards []Card) string {
+	if len(leadCards) == 1 {
+		return "single"
+	}
+
+	// 检查是否是对子或三张
+	firstValue := leadCards[0].Value
+	firstSuit := leadCards[0].Suit
+	allSameValue := true
+	allSameSuit := true
+
+	for _, card := range leadCards {
+		if card.Value != firstValue {
+			allSameValue = false
+		}
+		if card.Suit != firstSuit {
+			allSameSuit = false
+		}
+	}
+
+	if allSameValue && allSameSuit {
+		if len(leadCards) == 2 {
+			return "pair"
+		} else if len(leadCards) == 3 {
+			return "triple"
+		}
+	}
+
+	// 检查是否是拖拉机
+	if len(leadCards) >= 4 && isTractorWithContext(leadCards, "", "") {
+		return "tractor"
+	}
+
+	// 检查是否是混合甩牌
+	if allSameSuit && len(leadCards) > 1 {
+		return "throw"
+	}
+
+	return "mixed"
+}
+
+// validateFollowSuit 验证有领出花色时的跟牌是否合法
+func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, handCards []Card, trumpRank string) error {
+	leadCardCount := len(leadCards)
+
+	// 验证出牌数量必须与领出数量一致
+	if len(cards) != leadCardCount {
+		return fmt.Errorf("must play exactly %d cards, got %d", leadCardCount, len(cards))
+	}
+
+	// 分析玩家出的牌型
+	playCardType := analyzeLeadCardType(cards)
+
+	// 根据领出牌型验证跟随的牌
+	switch leadCardType {
+	case "triple":
+		// 领出三张：优先三张 -> 对子+单张 -> 单张
+		if playCardType == "triple" {
+			// 最佳选择：三张
+			return nil
+		}
+		if playCardType == "pair" || playCardType == "single" {
+			// 需要检查是否凑够了数量
+			// 这里简化处理：只要同花色即可
+			return nil
+		}
+		return nil // 简化：允许同花色任意组合
+
+	case "pair":
+		// 领出对子：优先对子 -> 单张
+		if playCardType == "pair" {
+			return nil
+		}
+		// 单张组合也可以
+		return nil
+
+	case "tractor":
+		// 领出拖拉机：优先拖拉机 -> 对子组合 -> 散牌组合
+		return nil // 简化处理
+
+	case "throw":
+		// 领出甩牌：按甩牌规则处理
+		return nil
+
+	default:
+		// 单张或其他：只要同花色即可
+		return nil
+	}
 }
 
 // isTractor checks if the cards form a tractor (consecutive pairs or triples)

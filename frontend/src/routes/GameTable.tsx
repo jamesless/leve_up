@@ -1,5 +1,5 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft, Play, SkipForward, Film, ChevronUp, ChevronDown, Eye, EyeOff } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
@@ -25,8 +25,8 @@ import {
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
-import { EGameStatus, ECardSuit, type ICard } from '@/types';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { EGameStatus, ECardSuit } from '@/types';
+import { useEffect, useRef, useState } from 'react';
 
 const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
 
@@ -75,12 +75,6 @@ export default function GameTable() {
   const hasAttemptedJoinRef = useRef(false);
   const lastAITurnRef = useRef<number | null>(null);
   const game = data?.game;
-
-  // 计算当前需要出的牌数量 - 已移除数量限制，出牌只需选择任意数量的同花色牌
-  const requiredCardCount = useMemo(() => {
-    // 不再限制出牌数量，用户可以选择任意数量的牌
-    return 0; // 0 表示不限制
-  }, [game?.currentTrick]);
 
   // DEBUG: Log game data
   useEffect(() => {
@@ -350,6 +344,7 @@ export default function GameTable() {
               position={SEAT_POSITIONS[i] ?? 'top'}
               isCurrentTurn={game.currentPlayer === player.position}
               isDealer={game.dealerTeam.includes(player.id)}
+              score={game.scores?.[player.position] ?? 0}
             />
           ))}
 

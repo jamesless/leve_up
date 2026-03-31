@@ -8,6 +8,7 @@ interface IPlayerSeatProps {
   isCurrentTurn?: boolean;
   isDealer?: boolean;
   position: 'top' | 'left' | 'right' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  score?: number; // 当前得分
 }
 
 // 圆桌布局：5个玩家均匀分布在圆周上
@@ -50,6 +51,7 @@ export default function PlayerSeat({
   isCurrentTurn = false,
   isDealer = false,
   position,
+  score = 0,
 }: IPlayerSeatProps) {
   const positionStyle = POSITION_STYLES[position] || {};
 
@@ -99,6 +101,11 @@ export default function PlayerSeat({
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-slate-400 border-slate-700">
               {player.cardCount}张
             </Badge>
+            {score > 0 && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-green-600/20 text-green-400 border-green-600/30">
+                {score}分
+              </Badge>
+            )}
           </div>
         </div>
       )}

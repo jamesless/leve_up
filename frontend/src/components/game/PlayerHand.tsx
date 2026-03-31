@@ -87,6 +87,18 @@ export default function PlayerHand({
   // 排序后的手牌（用于显示），保持原始索引用于选牌
   const sortedCards = useMemo(() => sortCards(cards), [cards]);
 
+  // 判断是否是主牌（叫庄结束后）- 必须在 groupCardsBySuit 之前定义
+  const isTrumpCard = (card: ICard) => {
+    if (!trumpSuit || !trumpRank) return false;
+    // 大小王永远是主牌
+    if (card.suit === 'joker') return true;
+    // 级牌永远是主牌
+    if (card.value === trumpRank) return true;
+    // 主牌花色的牌
+    if (card.suit === trumpSuit) return true;
+    return false;
+  };
+
   // 按花色分组（用于移动端标签页）
   const groupCardsBySuit = useMemo(() => {
     const groups: Record<string, ICard[]> = {
@@ -134,17 +146,7 @@ export default function PlayerHand({
     return trumpRank ? card.value === trumpRank : false;
   };
 
-  // 判断是否是主牌（叫庄结束后）
-  const isTrumpCard = (card: ICard) => {
-    if (!trumpSuit || !trumpRank) return false;
-    // 大小王永远是主牌
-    if (card.suit === 'joker') return true;
-    // 级牌永远是主牌
-    if (card.value === trumpRank) return true;
-    // 主牌花色的牌
-    if (card.suit === trumpSuit) return true;
-    return false;
-  };
+  // 这里的 isTrumpCard 已被移到前面定义（在 groupCardsBySuit 之前）
 
   // 判断是否显示级牌高亮（叫庄阶段）
   const shouldHighlightTrumpRank = (card: ICard): boolean => {
