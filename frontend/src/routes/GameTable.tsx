@@ -134,7 +134,7 @@ export default function GameTable() {
       setShowDiscardDialog(false);
       setShowCallFriendDialog(false);
     }
-  }, [game?.status, game?.callRecords, game?.passedSeats, game?.callPhase, game?.myPosition]);
+  }, [game?.status, game?.callRecords, game?.passedSeats, game?.callPhase, game?.myPosition, game?.dealerSeat]);
 
   // 自动加入游戏（如果尚未加入）
   useEffect(() => {

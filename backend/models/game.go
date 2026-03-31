@@ -420,7 +420,7 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 	}
 
 	if table.Status != "playing" && table.Status != "calling_friend" {
-		return fmt.Errorf("game not in playing or calling_friend state")
+		return fmt.Errorf("游戏不在进行中或叫朋友阶段")
 	}
 
 	if position < 1 || position > 3 {
@@ -556,7 +556,7 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 	}
 
 	if table.Status != "playing" {
-		return nil, fmt.Errorf("game not in playing state")
+		return nil, fmt.Errorf("游戏不在进行中")
 	}
 
 	// Find player's seat
@@ -1211,7 +1211,7 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 	}
 
 	if table.Status != "playing" {
-		return nil, fmt.Errorf("game not in playing state")
+		return nil, fmt.Errorf("游戏不在进行中")
 	}
 
 	// Check if this is a single-player game
@@ -1830,7 +1830,7 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 	}
 
 	if table.Status != "playing" {
-		return nil, fmt.Errorf("game not in playing state")
+		return nil, fmt.Errorf("游戏不在进行中")
 	}
 
 	// Find player's seat
@@ -1913,7 +1913,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 	}
 
 	if table.Status != "playing" {
-		return nil, fmt.Errorf("game not in playing state")
+		return nil, fmt.Errorf("游戏不在进行中")
 	}
 
 	// Find player's seat
@@ -2358,7 +2358,7 @@ func validateLeadPlay(cards []Card, table *GameTable) error {
 	}
 
 	if !allSameSuit {
-		return fmt.Errorf("invalid card combination: cards must be same suit")
+		return fmt.Errorf("无效的牌型：同花色牌才能一起出")
 	}
 
 	// This is a potential throw - validate it properly
@@ -2798,7 +2798,7 @@ func validateTractor(cards []Card, table *GameTable) error {
 
 	// Verify total card count matches
 	if len(cards) != len(valueCounts)*expectedCount {
-		return fmt.Errorf("invalid card count for tractor")
+		return fmt.Errorf("拖拉机牌数无效")
 	}
 
 	// Must have at least 2 groups
@@ -2893,7 +2893,7 @@ func getCardNumericValue(value string) int {
 // 5. 垫任意其他牌
 func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error {
 	if len(table.CurrentTrick) == 0 {
-		return fmt.Errorf("no lead to follow")
+		return fmt.Errorf("没有领出的牌")
 	}
 
 	// Get the lead play
@@ -2947,7 +2947,7 @@ func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error 
 				continue // 主牌可以用于毙牌
 			}
 			if card.Suit != leadSuit {
-				return fmt.Errorf("must follow lead suit %s, cannot play %s", leadSuit, card.Suit)
+				return fmt.Errorf("必须跟%s花色，不能出%s", leadSuit, card.Suit)
 			}
 		}
 
@@ -2959,7 +2959,7 @@ func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error 
 	// 规则3：没有领出花色可以毙牌或垫其他牌
 	// 只检查数量是否匹配
 	if len(cards) != leadCardCount {
-		return fmt.Errorf("must play exactly %d cards, got %d", leadCardCount, len(cards))
+		return fmt.Errorf("必须出%d张牌，实际出了%d张", leadCardCount, len(cards))
 	}
 
 	return nil
@@ -3013,47 +3013,99 @@ func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, han
 
 	// 验证出牌数量必须与领出数量一致
 	if len(cards) != leadCardCount {
-		return fmt.Errorf("must play exactly %d cards, got %d", leadCardCount, len(cards))
+		return fmt.Errorf("必须出%d张牌", leadCardCount)
+	}
+
+	// 禁止有领出花色的牌却出其他花色（毙牌除外）
+	leadSuit := leadCards[0].Suit
+	for _, card := range cards {
+		if card.Value == trumpRank || card.Value == "Joker" {
+			continue // 主牌可以用于毙牌
+		}
+		if card.Suit != leadSuit {
+			return fmt.Errorf("必须跟%s花色", leadSuit)
+		}
 	}
 
 	// 分析玩家出的牌型
 	playCardType := analyzeLeadCardType(cards)
 
+	// 检查玩家手中是否有更高级别的牌型必须跟牌
+	// 例如：有对子必须跟对子，有三张必须跟三张
+	handSuitCards := []Card{}
+	handOtherCards := []Card{} // 包括级牌和主牌
+	for _, card := range handCards {
+		if card.Value == trumpRank || card.Value == "Joker" {
+			handOtherCards = append(handOtherCards, card)
+		} else if card.Suit == leadSuit {
+			handSuitCards = append(handSuitCards, card)
+		} else {
+			handOtherCards = append(handOtherCards, card)
+		}
+	}
+
+	// 分析手牌中的牌型
+	hasPair := false
+	hasTriple := false
+	hasTractor := false
+
+	if len(handSuitCards) >= 2 {
+		// 检查是否有对子
+		valueCounts := make(map[string]int)
+		for _, card := range handSuitCards {
+			valueCounts[card.Value]++
+		}
+		for _, count := range valueCounts {
+			if count >= 2 {
+				hasPair = true
+			}
+			if count >= 3 {
+				hasTriple = true
+			}
+		}
+
+		// 检查是否有拖拉机
+		if len(handSuitCards) >= 4 && isTractorWithContext(handSuitCards, "", "") {
+			hasTractor = true
+		}
+	}
+
 	// 根据领出牌型验证跟随的牌
 	switch leadCardType {
 	case "triple":
-		// 领出三张：优先三张 -> 对子+单张 -> 单张
-		if playCardType == "triple" {
-			// 最佳选择：三张
-			return nil
+		// 领出三张：有三张必须出三张
+		if hasTriple && playCardType != "triple" {
+			return fmt.Errorf("领出三张，必须跟三张")
 		}
-		if playCardType == "pair" || playCardType == "single" {
-			// 需要检查是否凑够了数量
-			// 这里简化处理：只要同花色即可
-			return nil
+		// 有多于三张的同花色牌，也应该尽量跟三张
+		if len(handSuitCards) >= 3 && playCardType != "triple" && !hasTriple {
+			// 如果没有三张但有三张以上，检查是否可以用其他组合凑三张
+			// 简化处理：允许用对子+单张
 		}
-		return nil // 简化：允许同花色任意组合
 
 	case "pair":
-		// 领出对子：优先对子 -> 单张
-		if playCardType == "pair" {
-			return nil
+		// 领出对子：有对子必须跟对子
+		if hasPair && playCardType != "pair" {
+			return fmt.Errorf("领出对子，必须跟对子")
 		}
-		// 单张组合也可以
-		return nil
 
 	case "tractor":
-		// 领出拖拉机：优先拖拉机 -> 对子组合 -> 散牌组合
-		return nil // 简化处理
+		// 领出拖拉机：有拖拉机必须跟拖拉机
+		if hasTractor && playCardType != "tractor" {
+			return fmt.Errorf("领出拖拉机，必须跟拖拉机")
+		}
 
 	case "throw":
-		// 领出甩牌：按甩牌规则处理
-		return nil
+		// 领出甩牌（多于3张同花色）：有足够多同花色牌应尽量跟甩牌
+		if len(handSuitCards) >= leadCardCount && playCardType != "throw" && playCardType != "tractor" {
+			return fmt.Errorf("领出甩牌，必须跟甩牌")
+		}
 
 	default:
 		// 单张或其他：只要同花色即可
-		return nil
 	}
+
+	return nil
 }
 
 // isTractor checks if the cards form a tractor (consecutive pairs or triples)
@@ -3245,7 +3297,7 @@ func validateSingleSuitFollow(cards []Card, leadSuit string, trumpRank string) e
 				continue
 			}
 			if card.Suit != leadSuit {
-				return fmt.Errorf("must follow suit if possible")
+				return fmt.Errorf("有该花色必须跟该花色")
 			}
 		}
 	}
@@ -4002,12 +4054,12 @@ func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameT
 	// 验证只有庄家可以扣牌
 	dealerHand, ok := table.PlayerHands[table.DealerSeat]
 	if !ok || dealerHand.UserID != userID {
-		return nil, fmt.Errorf("only dealer can discard cards")
+		return nil, fmt.Errorf("只有庄家可以扣牌")
 	}
 
 	// 验证选择了7张牌
 	if len(cardIndices) != 7 {
-		return nil, fmt.Errorf("must select exactly 7 cards to discard")
+		return nil, fmt.Errorf("必须选择7张牌扣底")
 	}
 
 	// 验证索引有效性
