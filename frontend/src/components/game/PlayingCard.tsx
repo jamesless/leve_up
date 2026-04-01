@@ -37,13 +37,13 @@ export default function PlayingCard({
     return (
       <div
         className={cn(
-          'rounded-lg border-2 border-slate-600 bg-gradient-to-br from-blue-900 to-blue-950 shadow-md',
+          'rounded-xl glass-card border-2 border-white/20 shadow-md',
           SIZE_CLASSES[size],
           className,
         )}
       >
         <div className="flex h-full items-center justify-center">
-          <div className="h-3/4 w-3/4 rounded border border-blue-700 bg-blue-800/50" />
+          <div className="h-3/4 w-3/4 rounded-lg glass border border-white/30" />
         </div>
       </div>
     );
@@ -58,51 +58,51 @@ export default function PlayingCard({
       type="button"
       onClick={onClick}
       className={cn(
-        'relative flex flex-col rounded-lg border-2 bg-white shadow-md transition-all duration-150',
+        'relative flex flex-col rounded-xl glass-card shadow-md transition-all duration-200',
         SIZE_CLASSES[size],
-        onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-lg active:translate-y-0',
+        onClick && 'cursor-pointer hover:-translate-y-2 hover:shadow-xl hover:glass-strong active:translate-y-0',
         selected
-          ? 'border-amber-400 -translate-y-2 shadow-amber-400/30 ring-2 ring-amber-400/50'
+          ? 'border-2 border-primary/60 -translate-y-3 shadow-lg shadow-primary/30 ring-2 ring-primary/40 glow-soft'
           : isTrumpRank
-            ? 'border-blue-400 ring-2 ring-blue-400/50 shadow-blue-400/30' // 级牌高亮（蓝色）
+            ? 'border-2 border-secondary/60 ring-2 ring-secondary/40 shadow-secondary/30 glow-blue'
             : isTrump
-              ? 'border-green-400 ring-2 ring-green-400/50 shadow-green-400/30' // 主牌高亮（绿色）
-              : 'border-slate-200',
+              ? 'border-2 border-accent/60 ring-2 ring-accent/40 shadow-accent/30 glow-pink'
+              : 'border-2 border-white/20',
         className,
       )}
     >
       {/* 主牌标签 */}
       {showTrumpLabel && (
-        <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded bg-green-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+        <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-lg glass-card bg-accent/90 px-2 py-1 text-[10px] font-bold text-white shadow-md border border-white/30">
           主
         </div>
       )}
       {/* 盟友牌标签 */}
       {isFriend && (
-        <div className="absolute -right-1 -top-1 rounded-full bg-purple-500 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+        <div className="absolute -right-1 -top-1 rounded-full glass-card bg-primary/90 px-2 py-1 text-[10px] font-bold text-white shadow-md border border-white/30">
           友
         </div>
       )}
       <div
         className={cn(
-          'flex flex-1 flex-col items-start p-1 font-mono font-bold leading-none',
+          'flex flex-1 flex-col items-start p-1.5 font-mono font-bold leading-none',
           red ? 'text-red-600' : isJoker ? (isBigJoker ? 'text-red-600' : 'text-slate-800') : 'text-slate-900',
         )}
       >
-        <span className={size === 'sm' ? 'text-[10px]' : 'text-xs'}>
+        <span className={size === 'sm' ? 'text-[11px]' : 'text-sm'}>
           {getCardDisplayValue(card)}
         </span>
-        <span className={size === 'sm' ? 'text-xs' : 'text-sm'}>
+        <span className={size === 'sm' ? 'text-sm' : 'text-base'}>
           {getSuitSymbol(card.suit)}
         </span>
       </div>
       <div
         className={cn(
-          'absolute inset-0 flex items-center justify-center',
+          'absolute inset-0 flex items-center justify-center pointer-events-none',
           red ? 'text-red-600' : isJoker ? (isBigJoker ? 'text-red-600' : 'text-slate-800') : 'text-slate-900',
         )}
       >
-        <span className={cn(size === 'sm' ? 'text-lg' : size === 'md' ? 'text-2xl' : 'text-3xl', 'opacity-20')}>
+        <span className={cn(size === 'sm' ? 'text-xl' : size === 'md' ? 'text-3xl' : 'text-4xl', 'opacity-15')}>
           {getSuitSymbol(card.suit)}
         </span>
       </div>

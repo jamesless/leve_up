@@ -4,50 +4,68 @@
 
 @layer base {
   :root {
-    /* Dreamy theme - Light mode with soft pastels */
-    --background: 280 40% 98%;
-    --foreground: 280 30% 15%;
-    --card: 300 50% 99%;
-    --card-foreground: 280 30% 15%;
-    --popover: 300 50% 99%;
-    --popover-foreground: 280 30% 15%;
-    --primary: 280 70% 60%;
+    /* Glassmorphism Theme - Light mode */
+    --background: 220 30% 96%;
+    --foreground: 220 20% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+
+    /* Soft gradient colors */
+    --primary: 250 80% 60%; /* Soft Purple */
     --primary-foreground: 0 0% 100%;
-    --secondary: 320 60% 85%;
-    --secondary-foreground: 280 30% 20%;
-    --muted: 290 40% 92%;
-    --muted-foreground: 280 20% 45%;
-    --accent: 50 90% 70%;
-    --accent-foreground: 280 30% 20%;
-    --destructive: 0 72% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 290 30% 85%;
-    --input: 290 30% 90%;
-    --ring: 280 70% 60%;
+    --secondary: 200 70% 50%; /* Soft Blue */
+    --secondary-foreground: 0 0% 100%;
+    --accent: 330 70% 60%; /* Soft Pink */
+    --accent-foreground: 0 0% 100%;
+
+    --muted: 220 20% 92%;
+    --muted-foreground: 220 15% 50%;
+    --destructive: 0 70% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 20% 88%;
+    --input: 220 20% 90%;
+    --ring: 250 80% 60%;
     --radius: 1rem;
+
+    /* Glass colors */
+    --glass-white: 0 0% 100%;
+    --glass-blue: 220 80% 70%;
+    --glass-purple: 270 70% 70%;
+    --glass-pink: 330 70% 75%;
   }
 
   .dark {
-    /* Dreamy theme - Dark mode with rich purples and pinks */
-    --background: 280 50% 8%;
-    --foreground: 300 40% 95%;
-    --card: 285 45% 12%;
-    --card-foreground: 300 40% 95%;
-    --popover: 285 45% 12%;
-    --popover-foreground: 300 40% 95%;
-    --primary: 280 85% 65%;
+    /* Glassmorphism Theme - Dark mode */
+    --background: 230 35% 8%;
+    --foreground: 0 0% 98%;
+    --card: 230 30% 12%;
+    --card-foreground: 0 0% 98%;
+    --popover: 230 30% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Vibrant colors for dark */
+    --primary: 250 90% 65%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 320 60% 25%;
-    --secondary-foreground: 300 40% 95%;
-    --muted: 285 40% 18%;
-    --muted-foreground: 290 30% 60%;
-    --accent: 45 95% 65%;
-    --accent-foreground: 280 30% 10%;
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 285 35% 22%;
-    --input: 285 35% 20%;
-    --ring: 280 85% 65%;
+    --secondary: 200 80% 60%;
+    --secondary-foreground: 0 0% 100%;
+    --accent: 330 80% 65%;
+    --accent-foreground: 0 0% 100%;
+
+    --muted: 230 25% 18%;
+    --muted-foreground: 230 15% 65%;
+    --destructive: 0 80% 65%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 230 25% 22%;
+    --input: 230 25% 18%;
+    --ring: 250 90% 65%;
+
+    /* Glass colors for dark */
+    --glass-white: 0 0% 100%;
+    --glass-blue: 220 90% 65%;
+    --glass-purple: 270 80% 70%;
+    --glass-pink: 330 80% 70%;
   }
 }
 
@@ -58,14 +76,22 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
+    background-image:
+      radial-gradient(at 0% 0%, hsl(250, 80%, 60%) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsl(200, 70%, 50%) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsl(330, 70%, 60%) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(250, 80%, 60%) 0px, transparent 50%);
   }
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
+  .dark body {
+    background-image:
+      radial-gradient(at 0% 0%, hsl(250, 90%, 30%) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsl(200, 80%, 30%) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsl(330, 80%, 30%) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(250, 90%, 30%) 0px, transparent 50%);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
     @apply font-display;
   }
 }
@@ -73,5 +99,78 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Enhanced Glassmorphism utilities */
+  .glass {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 8px 32px 0 rgba(31, 38, 135, 0.2),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(30px) saturate(200%);
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    box-shadow:
+      0 8px 32px 0 rgba(31, 38, 135, 0.25),
+      inset 0 2px 0 0 rgba(255, 255, 255, 0.4);
+  }
+
+  .glass-light {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
+
+  /* Colored glass variants */
+  .glass-blue {
+    background: linear-gradient(135deg,
+      rgba(100, 200, 255, 0.12) 0%,
+      rgba(100, 150, 255, 0.08) 100%);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(100, 200, 255, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(100, 150, 255, 0.15);
+  }
+
+  .glass-purple {
+    background: linear-gradient(135deg,
+      rgba(150, 100, 255, 0.12) 0%,
+      rgba(200, 100, 255, 0.08) 100%);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(150, 100, 255, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(150, 100, 255, 0.15);
+  }
+
+  .glass-pink {
+    background: linear-gradient(135deg,
+      rgba(255, 100, 200, 0.12) 0%,
+      rgba(255, 150, 200, 0.08) 100%);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 100, 200, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(255, 100, 200, 0.15);
+  }
+
+  /* Soft glow effects */
+  .glow-soft {
+    box-shadow: 0 0 40px rgba(150, 100, 255, 0.3);
+  }
+
+  .glow-blue {
+    box-shadow: 0 0 40px rgba(100, 150, 255, 0.4);
+  }
+
+  .glow-pink {
+    box-shadow: 0 0 40px rgba(255, 100, 200, 0.4);
   }
 }

@@ -2,7 +2,7 @@ import PlayingCard from './PlayingCard';
 import { useGameStore } from '@/store/gameStore';
 import type { ICard } from '@/types';
 import { ECardSuit } from '@/types';
-import { useEffect, useRef, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 interface IPlayerHandProps {
@@ -33,7 +33,7 @@ export default function PlayerHand({
   const prevCount = useRef(cards.length);
 
   // 理牌函数：主牌单独放一堆，其他牌红黑交错
-  const sortCards = (cards: ICard[]): ICard[] => {
+  const sortCards = useCallback((cards: ICard[]): ICard[] => {
     // 判断是否是主牌
     const isTrumpCard = (card: ICard): boolean => {
       if (!trumpSuit || !trumpRank) return false;
@@ -82,13 +82,13 @@ export default function PlayerHand({
       if (suitDiff !== 0) return suitDiff;
       return valueOrder[b.value] - valueOrder[a.value];
     });
-  };
+  }, [trumpSuit, trumpRank]);
 
   // 排序后的手牌（用于显示），保持原始索引用于选牌
-  const sortedCards = useMemo(() => sortCards(cards), [cards]);
+  const sortedCards = useMemo(() => sortCards(cards), [cards, sortCards]);
 
   // 判断是否是主牌（叫庄结束后）- 必须在 groupCardsBySuit 之前定义
-  const isTrumpCard = (card: ICard) => {
+  const isTrumpCard = useCallback((card: ICard) => {
     if (!trumpSuit || !trumpRank) return false;
     // 大小王永远是主牌
     if (card.suit === 'joker') return true;
@@ -97,7 +97,7 @@ export default function PlayerHand({
     // 主牌花色的牌
     if (card.suit === trumpSuit) return true;
     return false;
-  };
+  }, [trumpSuit, trumpRank]);
 
   // 按花色分组（用于移动端标签页）
   const groupCardsBySuit = useMemo(() => {
@@ -124,7 +124,7 @@ export default function PlayerHand({
     });
 
     return groups;
-  }, [sortedCards, trumpSuit, trumpRank]);
+  }, [sortedCards, isTrumpCard]);
 
   const [activeTab, setActiveTab] = useState('trump');
 
@@ -132,7 +132,7 @@ export default function PlayerHand({
   const sortedToOriginalIndex = useMemo(() => {
     const sorted = sortCards([...cards.map((c, i) => ({ ...c, _origIndex: i }))]);
     return sorted.map(card => (card as ICard & { _origIndex: number })._origIndex);
-  }, [cards]);
+  }, [cards, sortCards]);
 
   useEffect(() => {
     if (cards.length !== prevCount.current) {
@@ -142,45 +142,45 @@ export default function PlayerHand({
   }, [cards.length, setCardCount]);
 
   // 判断是否是级牌
-  const isTrumpRankCard = (card: ICard): boolean => {
+  const isTrumpRankCard = useCallback((card: ICard): boolean => {
     return trumpRank ? card.value === trumpRank : false;
-  };
+  }, [trumpRank]);
 
   // 这里的 isTrumpCard 已被移到前面定义（在 groupCardsBySuit 之前）
 
   // 判断是否显示级牌高亮（叫庄阶段）
-  const shouldHighlightTrumpRank = (card: ICard): boolean => {
+  const shouldHighlightTrumpRank = useCallback((card: ICard): boolean => {
     if (gameStatus !== 'calling') return false;
     return isTrumpRankCard(card);
-  };
+  }, [gameStatus, isTrumpRankCard]);
 
   // 判断是否显示主牌高亮（叫庄结束后）
-  const shouldHighlightTrump = (card: ICard) => {
+  const shouldHighlightTrump = useCallback((card: ICard) => {
     // 叫庄阶段结束后才高亮主牌
     if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
     return isTrumpCard(card);
-  };
+  }, [gameStatus, isTrumpCard]);
 
   // 判断是否显示主牌标签
-  const shouldShowTrumpLabel = (card: ICard) => {
+  const shouldShowTrumpLabel = useCallback((card: ICard) => {
     // 只在叫庄结束后显示标签
     if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
     return isTrumpCard(card);
-  };
+  }, [gameStatus, isTrumpCard]);
 
   // 判断卡片是否可用
-  const isCardDisabled = (_index: number): boolean => {
+  const isCardDisabled = useCallback((_index: number): boolean => {
     //：所有玩家都可以 叫庄阶段选择级牌
     if (gameStatus === 'calling') return false;
     // 出牌阶段暂时不限制，任何牌都可以出
     return false;
-  };
+  }, [gameStatus]);
 
   // 判断是否是盟友牌
-  const isFriendCard = (card: ICard): boolean => {
+  const isFriendCard = useCallback((card: ICard): boolean => {
     if (!friendCard) return false;
     return card.suit === friendCard.suit && card.value === friendCard.value;
-  };
+  }, [friendCard]);
 
   return (
     <>

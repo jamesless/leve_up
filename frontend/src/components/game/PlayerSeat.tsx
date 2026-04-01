@@ -11,8 +11,7 @@ interface IPlayerSeatProps {
   score?: number; // 当前得分
 }
 
-// 圆桌布局：5个玩家均匀分布在圆周上
-// 假设玩家自己在底部中心，其他4个玩家分布在圆周的其他位置
+// 五角星对称布局 - 玩家在底部中心，其他4人均匀分布形成对称美感
 const POSITION_STYLES: Record<string, React.CSSProperties> = {
   'top': {
     top: '8%',
@@ -20,29 +19,29 @@ const POSITION_STYLES: Record<string, React.CSSProperties> = {
     transform: 'translateX(-50%)',
   },
   'top-left': {
-    top: '20%',
-    left: '15%',
+    top: '25%',
+    left: '12%',
   },
   'top-right': {
-    top: '20%',
-    right: '15%',
+    top: '25%',
+    right: '12%',
   },
   'bottom-left': {
-    bottom: '25%',
-    left: '8%',
+    bottom: '28%',
+    left: '18%',
   },
   'bottom-right': {
-    bottom: '25%',
-    right: '8%',
+    bottom: '28%',
+    right: '18%',
   },
   // Keeping old positions for backward compatibility
   'left': {
-    top: '20%',
-    left: '15%',
+    top: '25%',
+    left: '12%',
   },
   'right': {
-    top: '20%',
-    right: '15%',
+    top: '25%',
+    right: '12%',
   },
 };
 
@@ -57,52 +56,52 @@ export default function PlayerSeat({
 
   return (
     <div
-      className="absolute flex flex-col items-center gap-1"
+      className="absolute flex flex-col items-center gap-2"
       style={positionStyle}
     >
       <div className="relative">
         <div
           className={cn(
-            'flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all',
+            'flex h-14 w-14 items-center justify-center rounded-full border-2 transition-all glass-card',
             player
               ? isCurrentTurn
-                ? 'border-amber-400 bg-amber-400/10 shadow-lg shadow-amber-400/20'
-                : 'border-slate-600 bg-slate-800'
-              : 'border-dashed border-slate-700 bg-slate-900/50',
+                ? 'border-primary/60 shadow-lg shadow-primary/30 glow-soft'
+                : 'border-white/20'
+              : 'border-dashed border-white/10',
           )}
         >
           {player ? (
             player.isAI ? (
-              <span className="text-lg">🤖</span>
+              <span className="text-xl">🤖</span>
             ) : (
-              <User className="h-5 w-5 text-slate-400" />
+              <User className="h-6 w-6 text-foreground/80" />
             )
           ) : (
-            <span className="text-xs text-slate-600">空位</span>
+            <span className="text-xs text-muted-foreground">空位</span>
           )}
         </div>
         {player && !player.isAI && (
           <Badge
             variant="default"
-            className="absolute -top-1 -right-1 text-[10px] px-1 py-0 min-w-[18px] h-[18px] flex items-center justify-center bg-amber-500 text-white border-0"
+            className="absolute -top-1 -right-1 text-[10px] px-1.5 py-0.5 min-w-[20px] h-[20px] flex items-center justify-center bg-gradient-to-r from-primary to-accent text-white border-0 shadow-md"
           >
             {player.level || '2'}
           </Badge>
         )}
       </div>
       {player && (
-        <div className="flex flex-col items-center gap-0.5">
-          <span className="text-xs font-medium text-slate-300 max-w-[80px] truncate">
+        <div className="flex flex-col items-center gap-1 glass-light rounded-xl px-3 py-2 min-w-[100px]">
+          <span className="text-sm font-semibold text-foreground max-w-[90px] truncate">
             {player.username}
           </span>
-          <div className="flex gap-1">
-            {isDealer && <Badge variant="warning" className="text-[10px] px-1.5 py-0">庄</Badge>}
-            {player.isAI && <Badge variant="secondary" className="text-[10px] px-1.5 py-0">AI</Badge>}
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-slate-400 border-slate-700">
+          <div className="flex flex-wrap gap-1.5 justify-center">
+            {isDealer && <Badge variant="default" className="text-[10px] px-2 py-0.5 bg-gradient-to-r from-accent to-primary">庄</Badge>}
+            {player.isAI && <Badge variant="secondary" className="text-[10px] px-2 py-0.5 glass">AI</Badge>}
+            <Badge variant="outline" className="text-[10px] px-2 py-0.5 glass-light border-white/20">
               {player.cardCount}张
             </Badge>
             {score > 0 && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-green-600/20 text-green-400 border-green-600/30">
+              <Badge variant="secondary" className="text-[10px] px-2 py-0.5 glass-blue border-secondary/30 text-secondary font-semibold">
                 {score}分
               </Badge>
             )}

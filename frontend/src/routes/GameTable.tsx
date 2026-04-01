@@ -29,7 +29,8 @@ import { useAuthStore } from '@/store/authStore';
 import { EGameStatus, ECardSuit } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 
-const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
+// 五角星对称布局 - 玩家在底部，其他4人均匀分布
+const SEAT_POSITIONS = ['top', 'top-left', 'bottom-left', 'bottom-right', 'top-right'] as const;
 
 // 花色符号映射
 const SUIT_SYMBOLS: Record<string, string> = {
@@ -329,7 +330,7 @@ export default function GameTable() {
                 {SUIT_SYMBOLS[game.hostCalledCard.suit]}
               </span>{' '}
               <span className="font-bold">{game.hostCalledCard.value}</span>
-              <span className="text-purple-300 ml-1">
+              <span className="text-neon-cyan ml-1">
                 (打出第{game.hostCalledCard.position}张时亮明身份)
               </span>
             </Badge>
@@ -337,9 +338,22 @@ export default function GameTable() {
         </div>
       </div>
 
-      <div className="relative flex-1 bg-gradient-to-br from-purple-900 via-purple-700 to-pink-800 dark:from-purple-950 dark:via-purple-900 dark:to-pink-950">
-        <div className="absolute inset-0 bg-gradient-to-t from-purple-500/20 via-transparent to-pink-500/20 animate-pulse-glow pointer-events-none" />
-        <div className="absolute inset-4 rounded-3xl border-4 border-purple-300/30 dark:border-purple-500/30 bg-gradient-to-br from-purple-800/80 via-purple-700/80 to-pink-800/80 dark:from-purple-900/80 dark:via-purple-800/80 dark:to-pink-900/80 shadow-2xl backdrop-blur-sm">
+      <div className="relative flex-1 bg-gradient-to-br from-background via-background to-card">
+        {/* Soft Glassmorphism Background */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(150,100,255,0.08),transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_80%,rgba(100,150,255,0.08),transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(255,100,200,0.08),transparent_60%)]" />
+
+        {/* Main Table Surface - Enhanced Glass */}
+        <div className="absolute inset-4 rounded-3xl glass-card relative overflow-hidden">
+          {/* Subtle Border Glow */}
+          <div className="absolute inset-0 rounded-3xl border-2 border-white/10" />
+
+          {/* Corner Accents - Soft Colors */}
+          <div className="absolute top-0 left-0 w-32 h-32 bg-primary/10 blur-3xl rounded-tl-3xl" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-accent/10 blur-3xl rounded-tr-3xl" />
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-secondary/10 blur-3xl rounded-bl-3xl" />
+          <div className="absolute bottom-0 right-0 w-32 h-32 bg-primary/10 blur-3xl rounded-br-3xl" />
           {otherPlayers.map((player, i) => (
             <PlayerSeat
               key={player.id}
@@ -352,22 +366,24 @@ export default function GameTable() {
           ))}
 
           {game.currentTrick.length > 0 && (
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-2">
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-4">
               {game.currentTrick.map((played, i) => (
-                <div key={i} className="flex flex-col items-center gap-1 animate-float">
-                  <span className="text-xs text-purple-200 dark:text-purple-300 font-semibold">
+                <div key={i} className="flex flex-col items-center gap-3 animate-slide-up" style={{ animationDelay: `${i * 0.1}s` }}>
+                  <span className="text-sm font-semibold px-4 py-2 rounded-full glass-light border border-white/20">
                     {game.players.find((p) => p.id === played.playerId)?.username}
                   </span>
-                  <div className="flex gap-0.5">
+                  <div className="flex gap-2">
                     {played.cards.map((card, j) => (
                       <div
                         key={j}
-                        className="flex h-10 w-8 flex-col items-center justify-center rounded-lg border-2 border-purple-300/50 bg-gradient-to-br from-white via-pink-50 to-purple-50 text-xs font-bold shadow-lg shadow-purple-500/30 transform hover:scale-110 transition-transform"
+                        className="relative group flex h-14 w-11 flex-col items-center justify-center rounded-xl glass-card text-sm font-bold shadow-lg hover:scale-110 transition-all animate-fade-in"
+                        style={{ animationDelay: `${j * 0.05}s` }}
                       >
-                        <span className={getSuitClass(card.suit)}>
+                        <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/5 to-accent/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <span className={`relative z-10 text-lg ${getSuitClass(card.suit)}`}>
                           {SUIT_SYMBOLS[card.suit] || ''}
                         </span>
-                        <span className={getSuitClass(card.suit)}>
+                        <span className={`relative z-10 font-bold ${getSuitClass(card.suit)}`}>
                           {card.value}
                         </span>
                       </div>
@@ -381,19 +397,20 @@ export default function GameTable() {
       </div>
 
       {/* 手牌区域 - 手机端可折叠 */}
-      <div className="border-t border-border/40 bg-background/95">
+      <div className="border-t-2 border-white/10 glass backdrop-blur-xl">
         {/* 折叠按钮 */}
         <button
           onClick={() => setShowHand(!showHand)}
-          className="w-full py-2 flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 via-pink-600 to-purple-700 text-white hover:from-purple-600 hover:via-pink-500 hover:to-purple-600 transition-all duration-300 shadow-lg shadow-purple-500/50"
+          className="w-full py-4 flex items-center justify-center gap-3 bg-gradient-to-r from-primary/60 via-accent/60 to-secondary/60 hover:from-primary/80 hover:via-accent/80 hover:to-secondary/80 text-white font-bold transition-all duration-300 shadow-lg relative overflow-hidden group"
         >
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
           {showHand ? (
-            <EyeOff className="w-4 h-4" />
+            <EyeOff className="w-5 h-5 relative z-10" />
           ) : (
-            <Eye className="w-4 h-4" />
+            <Eye className="w-5 h-5 relative z-10" />
           )}
-          <span>{showHand ? '隐藏手牌' : '查看手牌'}</span>
-          <span className="text-xs bg-purple-500/50 px-2 py-0.5 rounded-full border border-pink-300/30">{game.myHand?.length || 0} 张</span>
+          <span className="relative z-10 text-lg">{showHand ? '隐藏手牌' : '查看手牌'}</span>
+          <span className="relative z-10 text-sm glass-light px-3 py-1 rounded-full">{game.myHand?.length || 0} 张</span>
         </button>
 
         {/* 手牌区域 - 当有对话框或点击展开时显示 */}
@@ -461,8 +478,8 @@ export default function GameTable() {
                         key={player.id}
                         className={`rounded-full px-3 py-1 text-sm font-medium shadow-md transition-all ${
                           isReady
-                            ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white animate-pulse-glow'
-                            : 'bg-gradient-to-r from-purple-500/50 to-pink-500/50 text-purple-100'
+                            ? 'bg-gradient-to-r from-neon-green to-neon-cyan text-white animate-glow-pulse'
+                            : 'bg-gradient-to-r from-neon-cyan/50 to-neon-magenta/50 text-foreground'
                         }`}
                       >
                         {player.username}
@@ -534,9 +551,9 @@ export default function GameTable() {
                 <p className="text-sm text-purple-200/90 dark:text-purple-100/90">
                   已发 {game.dealtCardCount || 0}/{game.totalCardsPerPlayer || 31} 张/人
                 </p>
-                <div className="mt-2 w-64 h-2 bg-purple-900/50 rounded-full overflow-hidden shadow-inner">
+                <div className="mt-2 w-64 h-3 glass rounded-full overflow-hidden shadow-inner border border-neon-cyan/30">
                   <div
-                    className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 transition-all duration-200 animate-shimmer shadow-lg shadow-pink-500/50"
+                    className="h-full bg-gradient-to-r from-neon-cyan via-neon-magenta to-neon-cyan bg-200% transition-all duration-200 animate-gradient-x shadow-lg shadow-neon-cyan/50"
                     style={{
                       width: `${((game.dealtCardCount || 0) / 31) * 100}%`,
                       backgroundSize: '200% 100%'
@@ -546,7 +563,7 @@ export default function GameTable() {
               </div>
 
               {/* 发牌过程中可以抢庄 */}
-              <p className="text-xs text-purple-300/80 dark:text-pink-300/80">
+              <p className="text-xs text-neon-cyan/80">
                 可以在发牌过程中选择级牌进行抢庄
               </p>
 
@@ -682,8 +699,8 @@ export default function GameTable() {
               </>
             )}
             {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (
-              <div className="rounded-lg border-2 border-purple-400/40 dark:border-pink-500/40 bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 text-center backdrop-blur-sm animate-pulse">
-                <p className="text-purple-200 dark:text-pink-200">等待其他玩家出牌...</p>
+              <div className="rounded-xl border-2 border-neon-cyan/40 glass p-6 text-center backdrop-blur-sm animate-glow-pulse">
+                <p className="text-neon-cyan font-bold text-lg">等待其他玩家出牌...</p>
               </div>
             )}
           </div>
