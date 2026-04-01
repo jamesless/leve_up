@@ -84,11 +84,60 @@
   }
 
   .dark body {
+    background-color: hsl(250, 45%, 18%);
     background-image:
-      radial-gradient(at 0% 0%, hsl(250, 90%, 30%) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, hsl(200, 80%, 30%) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, hsl(330, 80%, 30%) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, hsl(250, 90%, 30%) 0px, transparent 50%);
+      radial-gradient(circle at 10% 20%, hsla(270, 95%, 65%, 0.8) 0%, transparent 30%),
+      radial-gradient(circle at 90% 20%, hsla(330, 90%, 65%, 0.75) 0%, transparent 30%),
+      radial-gradient(circle at 90% 80%, hsla(200, 85%, 60%, 0.7) 0%, transparent 30%),
+      radial-gradient(circle at 10% 80%, hsla(280, 90%, 60%, 0.75) 0%, transparent 30%),
+      radial-gradient(circle at 50% 50%, hsla(250, 80%, 55%, 0.6) 0%, transparent 40%);
+    background-size: 100% 100%;
+    background-attachment: fixed;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  .dark body::after {
+    content: '♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣';
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    font-size: 40px;
+    color: rgba(139, 92, 246, 0.15);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    align-items: center;
+    gap: 30px;
+    padding: 30px;
+    pointer-events: none;
+    z-index: 1;
+    line-height: 1;
+  }
+
+  .dark body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image:
+      repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(139, 92, 246, 0.08) 40px, rgba(139, 92, 246, 0.08) 80px),
+      repeating-linear-gradient(-45deg, transparent, transparent 40px, rgba(236, 72, 153, 0.08) 40px, rgba(236, 72, 153, 0.08) 80px),
+      radial-gradient(circle at 25% 25%, rgba(139, 92, 246, 0.15) 0%, transparent 15%),
+      radial-gradient(circle at 75% 25%, rgba(236, 72, 153, 0.15) 0%, transparent 15%),
+      radial-gradient(circle at 25% 75%, rgba(59, 130, 246, 0.12) 0%, transparent 15%),
+      radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.12) 0%, transparent 15%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .dark body > * {
+    position: relative;
+    z-index: 2;
   }
 
   h1, h2, h3, h4, h5, h6 {

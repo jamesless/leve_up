@@ -1,6 +1,6 @@
 import { useState, useMemo, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Plus, Bot, Users, Loader2, RefreshCw, Crown, Search, Clock, Play } from 'lucide-react';
+import { Plus, Bot, Users, Loader2, RefreshCw, Crown, Search, Clock, Play, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,9 +46,10 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
 
   return (
     <Card
-      className={`transition-all hover:shadow-md ${
-        canJoin ? 'cursor-pointer border-primary/50 hover:border-primary' : ''
+      className={`relative transition-all duration-300 bg-gradient-to-br from-purple-950/10 via-purple-900/5 to-pink-950/10 border-purple-500/40 hover:border-purple-400/80 backdrop-blur-xl shadow-xl shadow-purple-900/10 hover:shadow-purple-500/50 hover:shadow-2xl ${
+        canJoin ? 'cursor-pointer hover:bg-gradient-to-br hover:from-purple-950/15 hover:via-purple-900/10 hover:to-pink-950/15 group' : ''
       }`}
+      style={{ backgroundColor: 'rgba(88, 28, 135, 0.02)' }}
       onClick={() => canJoin && onJoin(game.id)}
     >
       <CardHeader className="pb-3">
@@ -57,8 +58,8 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
             <CardTitle className="text-base truncate flex items-center gap-2">
               {game.name}
               {isHost && (
-                <Badge variant="secondary" className="text-xs">
-                  <Crown className="h-3 w-3 mr-1" />
+                <Badge variant="secondary" className="text-xs bg-gradient-to-r from-purple-500/30 to-pink-500/30 border-purple-400/40 text-purple-100">
+                  <Crown className="h-3 w-3 mr-1 text-yellow-400" />
                   我的
                 </Badge>
               )}
@@ -81,14 +82,25 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
         {game.players && game.players.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {game.players.map((player) => (
-              <Badge key={player.id} variant="secondary" className="text-xs">
+              <Badge
+                key={player.id}
+                variant="secondary"
+                className="text-xs bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-purple-400/30 text-purple-100 hover:from-purple-500/30 hover:to-pink-500/30"
+              >
                 {player.username}
-                {player.id === game.hostId && <Crown className="ml-1 h-3 w-3 text-yellow-600" />}
+                {player.id === game.hostId && <Crown className="ml-1 h-3 w-3 text-yellow-400" />}
               </Badge>
             ))}
           </div>
         )}
       </CardContent>
+      {canJoin && (
+        <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-full p-2 shadow-lg shadow-purple-500/50">
+            <LogIn className="h-4 w-4 text-white" />
+          </div>
+        </div>
+      )}
     </Card>
   );
 };
@@ -171,13 +183,17 @@ export default function GameLobby() {
           )}
         </div>
         <div className="flex gap-2">
-          <Button variant="game" className="gap-2" onClick={() => setShowCreate(true)}>
+          <Button
+            variant="default"
+            className="gap-2 bg-gradient-to-r from-purple-500/90 to-pink-500/90 hover:from-purple-600/90 hover:to-pink-600/90 text-white shadow-lg shadow-purple-500/20 border-0"
+            onClick={() => setShowCreate(true)}
+          >
             <Plus className="h-4 w-4" />
             创建房间
           </Button>
           <Button
             variant="outline"
-            className="gap-2"
+            className="gap-2 border-purple-500/30 bg-purple-950/20 hover:bg-purple-900/30 text-purple-300 hover:text-purple-200 shadow-md shadow-purple-500/10"
             onClick={() => createSingle.mutate()}
             disabled={createSingle.isPending}
           >
