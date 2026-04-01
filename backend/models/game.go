@@ -46,24 +46,25 @@ type PlayerHand struct {
 
 // GameTable represents the active game table
 type GameTable struct {
-	GameID         string              `json:"gameId"`
-	HostID         string              `json:"hostId"`
-	Status         string              `json:"status"`         // waiting, calling, playing, finished
-	CurrentLevel   string              `json:"currentLevel"`   // Current level being played
-	TrumpSuit      string              `json:"trumpSuit"`      // Current trump suit
-	HostCalledCard *CalledCard         `json:"hostCalledCard"` // Card host called for friend
-	FriendRevealed bool                `json:"friendRevealed"` // Whether friend has been revealed
-	FriendSeat     int                 `json:"friendSeat"`     // Seat number of friend (when revealed)
-	IsSoloMode     bool                `json:"isSoloMode"`     // Whether this is 1v4 mode (called card is in dealer's hand/bottom)
-	BottomCards    []Card              `json:"bottomCards"`    // 7 bottom cards
-	CurrentPlayer  int                 `json:"currentPlayer"`  // Current player's seat (1-5)
-	CurrentTrick   []PlayedCard        `json:"currentTrick"`   // Cards in current trick
-	TrickLeader    int                 `json:"trickLeader"`    // Who led the current trick
-	TricksWon      [][]Card            `json:"tricksWon"`      // All tricks won by defender team
-	PlayerHands    map[int]*PlayerHand `json:"playerHands"`    // Seat -> PlayerHand
-	LastPlay       *PlayResult         `json:"lastPlay"`       // Last play result
-	CreatedAt      time.Time           `json:"createdAt"`
-	UpdatedAt      time.Time           `json:"updatedAt"`
+	GameID             string              `json:"gameId"`
+	HostID             string              `json:"hostId"`
+	Status             string              `json:"status"`                       // waiting, calling, playing, finished
+	CurrentLevel       string              `json:"currentLevel"`                 // Current level being played
+	TrumpSuit          string              `json:"trumpSuit"`                    // Current trump suit
+	HostCalledCard     *CalledCard         `json:"hostCalledCard"`               // Card host called for friend
+	FriendRevealed     bool                `json:"friendRevealed"`               // Whether friend has been revealed
+	FriendSeat         int                 `json:"friendSeat"`                   // Seat number of friend (when revealed)
+	IsSoloMode         bool                `json:"isSoloMode"`                   // Whether this is 1v4 mode (called card is in dealer's hand/bottom)
+	BottomCards        []Card              `json:"bottomCards"`                  // 7 bottom cards
+	CurrentPlayer      int                 `json:"currentPlayer"`                // Current player's seat (1-5)
+	CurrentTrick       []PlayedCard        `json:"currentTrick"`                 // Cards in current trick
+	LastCompletedTrick []PlayedCard        `json:"lastCompletedTrick,omitempty"` // Cards from the previous completed trick
+	TrickLeader        int                 `json:"trickLeader"`                  // Who led the current trick
+	TricksWon          [][]Card            `json:"tricksWon"`                    // All tricks won by defender team
+	PlayerHands        map[int]*PlayerHand `json:"playerHands"`                  // Seat -> PlayerHand
+	LastPlay           *PlayResult         `json:"lastPlay"`                     // Last play result
+	CreatedAt          time.Time           `json:"createdAt"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
 
 	// 抢庄相关字段
 	DealerSeat         int          `json:"dealerSeat"`         // 庄家座位号
@@ -649,6 +650,9 @@ func PlayCardGame(gameID, userID string, cardIndex int) (*PlayResult, error) {
 		table.TricksWon = append(table.TricksWon, []Card{card})
 
 		// Clear trick and set winner as next leader
+		// Save current trick to last completed trick before clearing
+		table.LastCompletedTrick = make([]PlayedCard, len(table.CurrentTrick))
+		copy(table.LastCompletedTrick, table.CurrentTrick)
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
@@ -1891,6 +1895,9 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 		}
 
 		// Clear trick and set winner as next leader
+		// Save current trick to last completed trick before clearing
+		table.LastCompletedTrick = make([]PlayedCard, len(table.CurrentTrick))
+		copy(table.LastCompletedTrick, table.CurrentTrick)
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
@@ -2142,6 +2149,9 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		})
 
 		// Clear trick and set winner as next leader
+		// Save current trick to last completed trick before clearing
+		table.LastCompletedTrick = make([]PlayedCard, len(table.CurrentTrick))
+		copy(table.LastCompletedTrick, table.CurrentTrick)
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
@@ -2299,7 +2309,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 // validateCardPlay validates if the selected cards form a valid play
 func validateCardPlay(cards []Card, table *GameTable, hand *PlayerHand) error {
 	if len(cards) == 0 {
-		return fmt.Errorf("no cards to play")
+		return fmt.Errorf("没有选择牌")
 	}
 
 	// Check if this is the first play of the trick
@@ -2335,10 +2345,10 @@ func validateLeadPlay(cards []Card, table *GameTable) error {
 
 	for _, card := range cards {
 		if card.Value != firstValue {
-			return fmt.Errorf("all cards must have the same value for pairs/triples")
+			return fmt.Errorf("对子/三张必须是相同点数的牌")
 		}
 		if card.Suit != firstSuit {
-			return fmt.Errorf("all cards must have the same suit for pairs/triples")
+			return fmt.Errorf("对子/三张必须是相同花色的牌")
 		}
 	}
 
@@ -2761,14 +2771,14 @@ func getSuitDisplayName(suit string) string {
 func validateTractor(cards []Card, table *GameTable) error {
 	// Tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)
 	if len(cards) < 4 {
-		return fmt.Errorf("tractor must have at least 4 cards (2 pairs) or 6 cards (2 triples)")
+		return fmt.Errorf("拖拉机至少需要4张牌(2个对子)或6张牌(2个三张)")
 	}
 
 	// All cards must have the same suit
 	firstSuit := cards[0].Suit
 	for _, card := range cards {
 		if card.Suit != firstSuit {
-			return fmt.Errorf("all cards in tractor must have the same suit")
+			return fmt.Errorf("拖拉机的所有牌必须是相同花色")
 		}
 	}
 
@@ -2787,11 +2797,11 @@ func validateTractor(cards []Card, table *GameTable) error {
 			firstValue = false
 			// Must be either 2 (pairs) or 3 (triples)
 			if expectedCount != 2 && expectedCount != 3 {
-				return fmt.Errorf("tractor consists of consecutive pairs (2) or triples (3)")
+				return fmt.Errorf("拖拉机必须由连续的对子或连续的三张组成")
 			}
 		} else {
 			if count != expectedCount {
-				return fmt.Errorf("tractor must be all pairs or all triples, not mixed")
+				return fmt.Errorf("拖拉机必须全部是对子或全部是三张，不能混合")
 			}
 		}
 	}
@@ -2803,7 +2813,7 @@ func validateTractor(cards []Card, table *GameTable) error {
 
 	// Must have at least 2 groups
 	if len(valueCounts) < 2 {
-		return fmt.Errorf("tractor must have at least 2 groups")
+		return fmt.Errorf("拖拉机至少需要2组牌")
 	}
 
 	// Check if values are consecutive using the card rank system
@@ -2848,7 +2858,7 @@ func validateTractor(cards []Card, table *GameTable) error {
 		if currRank >= 600 && prevRank >= 600 {
 			// Both are trump cards (same suit as trump)
 			if currRank != prevRank+1 {
-				return fmt.Errorf("tractor values must be consecutive")
+				return fmt.Errorf("拖拉机的点数必须连续")
 			}
 		} else if currRank < 600 && prevRank < 600 {
 			// Both are non-trump cards
@@ -2861,14 +2871,14 @@ func validateTractor(cards []Card, table *GameTable) error {
 			// Otherwise they should differ by 1
 			if prevBase < trumpRankBase && currBase > trumpRankBase {
 				if currBase != prevBase+2 {
-					return fmt.Errorf("tractor values must be consecutive (considering trump rank skip)")
+					return fmt.Errorf("拖拉机的点数必须连续(考虑级牌跳过)")
 				}
 			} else if currBase != prevBase+1 {
-				return fmt.Errorf("tractor values must be consecutive")
+				return fmt.Errorf("拖拉机的点数必须连续")
 			}
 		} else {
 			// One is trump, one is not - this shouldn't happen as we checked same suit
-			return fmt.Errorf("mixed trump and non-trump cards in tractor")
+			return fmt.Errorf("拖拉机不能混合主牌和副牌")
 		}
 	}
 
@@ -2953,7 +2963,7 @@ func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error 
 
 		// 规则2：跟色情况下牌型必须尽可能接近
 		// 根据领出牌型验证跟随的牌
-		return validateFollowSuit(cards, leadCards, leadCardType, hand.Cards, table.TrumpRank)
+		return validateFollowSuit(cards, leadCards, leadCardType, hand.Cards, table.TrumpSuit, table.TrumpRank)
 	}
 
 	// 规则3：没有领出花色可以毙牌或垫其他牌
@@ -3008,7 +3018,7 @@ func analyzeLeadCardType(leadCards []Card) string {
 }
 
 // validateFollowSuit 验证有领出花色时的跟牌是否合法
-func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, handCards []Card, trumpRank string) error {
+func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, handCards []Card, trumpSuit string, trumpRank string) error {
 	leadCardCount := len(leadCards)
 
 	// 验证出牌数量必须与领出数量一致
@@ -3064,9 +3074,9 @@ func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, han
 			}
 		}
 
-		// 检查是否有拖拉机
-		if len(handSuitCards) >= 4 && isTractorWithContext(handSuitCards, "", "") {
-			hasTractor = true
+		// 检查是否有拖拉机：需要检查是否存在连续的对子或三张
+		if len(handSuitCards) >= 4 {
+			hasTractor = containsTractor(handSuitCards, valueCounts, trumpSuit, trumpRank)
 		}
 	}
 
@@ -3106,6 +3116,72 @@ func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, han
 	}
 
 	return nil
+}
+
+// containsTractor 检查手牌中是否包含拖拉机
+// 拖拉机是连续的对子或三张
+func containsTractor(handSuitCards []Card, valueCounts map[string]int, trumpSuit, trumpRank string) bool {
+	// 拖拉机需要至少2组对子或2组三张
+	// 首先找出所有有对子或三张的点数
+	pairs := []string{}   // 有对子的点数
+	triples := []string{} // 有三张的点数
+
+	for value, count := range valueCounts {
+		if count >= 3 {
+			triples = append(triples, value)
+		} else if count >= 2 {
+			pairs = append(pairs, value)
+		}
+	}
+
+	// 检查三张是否能构成拖拉机（至少2组连续的三张）
+	if len(triples) >= 2 {
+		if hasConsecutiveValues(triples, trumpRank) {
+			return true
+		}
+	}
+
+	// 检查对子是否能构成拖拉机（至少2组连续的对子）
+	if len(pairs) >= 2 {
+		if hasConsecutiveValues(pairs, trumpRank) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasConsecutiveValues 检查给定的点数数组中是否存在连续的点数
+// 考虑级牌跳过的情况
+func hasConsecutiveValues(values []string, trumpRank string) bool {
+	if len(values) < 2 {
+		return false
+	}
+
+	// 按点数排序
+	sort.Slice(values, func(i, j int) bool {
+		return getCardNumericValue(values[i]) < getCardNumericValue(values[j])
+	})
+
+	trumpRankBase := getCardNumericValue(trumpRank)
+
+	// 检查是否有连续的点数
+	for i := 1; i < len(values); i++ {
+		prevBase := getCardNumericValue(values[i-1])
+		currBase := getCardNumericValue(values[i])
+
+		// 正常连续（差1）
+		if currBase == prevBase+1 {
+			return true
+		}
+
+		// 跨级牌连续（差2，且级牌在中间）
+		if currBase == prevBase+2 && prevBase < trumpRankBase && currBase > trumpRankBase {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isTractor checks if the cards form a tractor (consecutive pairs or triples)
@@ -3722,13 +3798,8 @@ func CheckAndProcessCountdown(gameID string) (*GameTable, error) {
 			},
 		})
 
-		// 如果是单人模式，直接进入找朋友阶段
-		if isSinglePlayerGame(table) {
-			return finalizeDealerAndStartPlaying(table)
-		}
-
-		table.UpdatedAt = time.Now()
-		return table, nil
+		// 确定庄家后，进入叫朋友和扣底牌阶段
+		return finalizeDealerAndStartPlaying(table)
 	}
 
 	// 情况2：无人叫庄，进入翻底牌阶段

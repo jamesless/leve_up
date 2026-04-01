@@ -70,6 +70,58 @@ func LogGameAction(req GameActionLogRequest) error {
 	return nil
 }
 
+// GetPlayerPlayedCardsHistory 获取特定玩家在某个游戏中的所有出牌历史
+func GetPlayerPlayedCardsHistory(gameID string, playerSeat int) ([]GameActionLog, error) {
+	query := `
+		SELECT id, game_id, action_type, player_seat, player_id, action_data, result_data, timestamp
+		FROM game_action_logs
+		WHERE game_id = $1 AND action_type = 'play_cards' AND player_seat = $2
+		ORDER BY timestamp ASC
+	`
+
+	rows, err := db.Query(query, gameID, playerSeat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query player played cards history: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []GameActionLog
+	for rows.Next() {
+		var log GameActionLog
+		var playerID sql.NullString
+		var resultData sql.NullString
+
+		err := rows.Scan(
+			&log.ID,
+			&log.GameID,
+			&log.ActionType,
+			&log.PlayerSeat,
+			&playerID,
+			&log.ActionData,
+			&resultData,
+			&log.Timestamp,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan game action log: %w", err)
+		}
+
+		if playerID.Valid {
+			log.PlayerID = playerID.String
+		}
+		if resultData.Valid {
+			log.ResultData = json.RawMessage(resultData.String)
+		}
+
+		logs = append(logs, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating game action logs: %w", err)
+	}
+
+	return logs, nil
+}
+
 // GetGameActionLogs retrieves all action logs for a specific game
 func GetGameActionLogs(gameID string) ([]GameActionLog, error) {
 	query := `

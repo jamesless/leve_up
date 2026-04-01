@@ -1,5 +1,5 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
@@ -7,6 +7,7 @@ import PlayerSeat from '@/components/game/PlayerSeat';
 import CallDealerDialog from '@/components/game/CallDealerDialog';
 import DiscardDialog from '@/components/game/DiscardDialog';
 import CallFriendDialog from '@/components/game/CallFriendDialog';
+import PlayedCardsHistoryDialog from '@/components/game/PlayedCardsHistoryDialog';
 import {
   useGameTable,
   usePlayCards,
@@ -91,6 +92,7 @@ export default function GameTable() {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
   const [showHand, setShowHand] = useState(true); // 控制手牌显示/隐藏
+  const [showPlayedCardsDialog, setShowPlayedCardsDialog] = useState(false); // 控制已出牌历史对话框
 
   useEffect(() => {
     if (!isSinglePlayerRoute || hasTriggeredAutoStartRef.current) return;
@@ -637,16 +639,27 @@ export default function GameTable() {
             )}
             {game.status === EGameStatus.PLAYING && game.currentPlayer === game.myPosition && (
               <>
-                <Button
-                  variant="game"
-                  size="lg"
-                  className="gap-2 text-base font-bold"
-                  onClick={handlePlay}
-                  disabled={selectedCardIndices.size === 0 || playCards.isPending}
-                >
-                  {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
-                  出牌 ({selectedCardIndices.size})
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="game"
+                    size="lg"
+                    className="gap-2 text-base font-bold"
+                    onClick={handlePlay}
+                    disabled={selectedCardIndices.size === 0 || playCards.isPending}
+                  >
+                    {playCards.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+                    出牌 ({selectedCardIndices.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="gap-2 text-base"
+                    onClick={() => setShowPlayedCardsDialog(true)}
+                  >
+                    <History className="h-5 w-5" />
+                    查看已出牌
+                  </Button>
+                </div>
                 <Button
                   variant="outline"
                   size="lg"
@@ -689,6 +702,18 @@ export default function GameTable() {
           <p className="mt-2 text-center text-sm text-destructive">{callFriendMutation.error.message}</p>
         )}
       </div>
+
+      {/* 已出牌历史对话框 */}
+      {showPlayedCardsDialog && game && (
+        <PlayedCardsHistoryDialog
+          gameId={gameId}
+          onClose={() => setShowPlayedCardsDialog(false)}
+          currentTrick={game.currentTrick || []}
+          lastCompletedTrick={game.lastCompletedTrick || []}
+          players={game.players || []}
+          myPosition={game.myPosition}
+        />
+      )}
     </div>
   );
 }

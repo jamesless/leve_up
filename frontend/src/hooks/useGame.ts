@@ -268,3 +268,13 @@ export function useDealNextCard(gameId: string) {
     },
   });
 }
+
+// 获取玩家已出牌历史
+export function usePlayerPlayedCards(gameId: string, enabled = false) {
+  return useQuery({
+    queryKey: ['playerPlayedCards', gameId],
+    queryFn: () => gameService.getPlayerPlayedCards(gameId),
+    enabled: Boolean(gameId) && enabled,
+    staleTime: 0, // 每次打开对话框都重新获取
+  });
+}

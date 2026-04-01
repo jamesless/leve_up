@@ -988,6 +988,15 @@ func GetGameTableHandler(c *gin.Context) {
 		})
 	}
 
+	// 转换上一轮完成的出牌记录
+	lastCompletedTrick := make([]map[string]interface{}, 0, len(table.LastCompletedTrick))
+	for _, trick := range table.LastCompletedTrick {
+		lastCompletedTrick = append(lastCompletedTrick, map[string]interface{}{
+			"playerId": trick.Seat,
+			"cards":    []models.Card{trick.Card},
+		})
+	}
+
 	dealerTeam := make([]int, 0, 2)
 	if table.DealerSeat > 0 {
 		dealerTeam = append(dealerTeam, table.DealerSeat)
@@ -1002,24 +1011,25 @@ func GetGameTableHandler(c *gin.Context) {
 	}
 
 	gamePayload := map[string]interface{}{
-		"id":            table.GameID,
-		"status":        table.Status,
-		"currentLevel":  table.CurrentLevel,
-		"currentPlayer": table.CurrentPlayer,
-		"dealerTeam":    dealerTeam,
-		"currentTrick":  currentTrick,
-		"players":       players,
-		"myHand":        myHand,
-		"myPosition":    myPosition,
-		"trumpSuit":     trumpSuit,
-		"trumpRank":     table.TrumpRank,
-		"bottomCards":   table.BottomCards,
-		"scores":        scores,
-		"dealerSeat":    table.DealerSeat,
-		"callRecords":   table.CallRecords,
-		"passedSeats":   table.PassedSeats,
-		"callCountdown": table.CallCountdown,
-		"callPhase":     table.CallPhase,
+		"id":                 table.GameID,
+		"status":             table.Status,
+		"currentLevel":       table.CurrentLevel,
+		"currentPlayer":      table.CurrentPlayer,
+		"dealerTeam":         dealerTeam,
+		"currentTrick":       currentTrick,
+		"lastCompletedTrick": lastCompletedTrick,
+		"players":            players,
+		"myHand":             myHand,
+		"myPosition":         myPosition,
+		"trumpSuit":          trumpSuit,
+		"trumpRank":          table.TrumpRank,
+		"bottomCards":        table.BottomCards,
+		"scores":             scores,
+		"dealerSeat":         table.DealerSeat,
+		"callRecords":        table.CallRecords,
+		"passedSeats":        table.PassedSeats,
+		"callCountdown":      table.CallCountdown,
+		"callPhase":          table.CallPhase,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1163,5 +1173,48 @@ func GetGameActionsHandler(c *gin.Context) {
 		"success": true,
 		"actions": actions,
 		"count":   len(actions),
+	})
+}
+
+// GetPlayerPlayedCardsHandler 获取玩家在当前游戏中的出牌历史
+func GetPlayerPlayedCardsHandler(c *gin.Context) {
+	gameID := c.Param("id")
+	userID := c.GetString("userID")
+
+	// 获取游戏信息，找到玩家的座位号
+	table, err := models.GetTableGame(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusNotFound, "Game not found")
+		return
+	}
+
+	// 找到玩家的座位号
+	var playerSeat int
+	found := false
+	for seat, hand := range table.PlayerHands {
+		if hand.UserID == userID {
+			playerSeat = seat
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		middleware.SendError(c, http.StatusForbidden, "Player not in game")
+		return
+	}
+
+	// 获取该玩家的所有出牌历史
+	playedCards, err := models.GetPlayerPlayedCardsHistory(gameID, playerSeat)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, "Failed to retrieve played cards history")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"playedCards": playedCards,
+		"count":       len(playedCards),
+		"playerSeat":  playerSeat,
 	})
 }

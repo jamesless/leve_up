@@ -116,6 +116,8 @@ func main() {
 			// Replay APIs
 			protected.GET("/game/:id/replay", handlers.GetGameReplayHandler)
 			protected.GET("/game/:id/actions", handlers.GetGameActionsHandler)
+			// Player played cards history
+			protected.GET("/game/:id/played-cards", handlers.GetPlayerPlayedCardsHandler)
 		}
 	}
 

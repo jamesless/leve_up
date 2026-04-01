@@ -38,6 +38,7 @@ export interface IGameState {
   currentPlayer: number;
   dealerTeam: number[];
   currentTrick: IPlayedCards[];
+  lastCompletedTrick?: IPlayedCards[]; // 上一轮完成的所有出牌记录
   players: IPlayer[];
   myHand: ICard[];
   myPosition: number;

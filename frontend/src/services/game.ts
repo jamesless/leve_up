@@ -94,3 +94,35 @@ export interface IDealNextResponse {
 
 export const dealNextCard = (id: string) =>
   post<IDealNextResponse>(`/game/${id}/deal-next`);
+
+// 获取玩家已出牌历史
+export interface IPlayedCardRecord {
+  id: number;
+  gameId: string;
+  actionType: string;
+  playerSeat: number;
+  playerId: string;
+  actionData: {
+    card_indices: number[];
+    cards: Array<{
+      suit: string;
+      value: string;
+    }>;
+    is_lead: boolean;
+    play_type: string;
+  };
+  resultData: {
+    success: boolean;
+  };
+  timestamp: string;
+}
+
+export interface IPlayerPlayedCardsResponse {
+  success: boolean;
+  playedCards: IPlayedCardRecord[];
+  count: number;
+  playerSeat: number;
+}
+
+export const getPlayerPlayedCards = (id: string) =>
+  get<IPlayerPlayedCardsResponse>(`/game/${id}/played-cards`);
