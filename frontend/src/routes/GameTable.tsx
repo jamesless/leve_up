@@ -323,13 +323,13 @@ export default function GameTable() {
             </Badge>
           )}
           {game.hostCalledCard && (
-            <Badge variant="outline" className="gap-1 bg-purple-950/50 border-purple-500 text-purple-200">
-              <span className="text-purple-300">🎯 盟友牌:</span>{' '}
+            <Badge variant="outline" className="gap-1 bg-purple-900/70 border-purple-400/50 text-purple-100 shadow-lg shadow-purple-500/30">
+              <span className="text-pink-300 animate-sparkle">🎯 盟友牌:</span>{' '}
               <span className={getSuitClass(game.hostCalledCard.suit)}>
                 {SUIT_SYMBOLS[game.hostCalledCard.suit]}
               </span>{' '}
               <span className="font-bold">{game.hostCalledCard.value}</span>
-              <span className="text-purple-400 ml-1">
+              <span className="text-purple-300 ml-1">
                 (打出第{game.hostCalledCard.position}张时亮明身份)
               </span>
             </Badge>
@@ -337,8 +337,9 @@ export default function GameTable() {
         </div>
       </div>
 
-      <div className="relative flex-1 bg-gradient-to-b from-felt-dark via-felt to-felt-dark">
-        <div className="absolute inset-4 rounded-3xl border-4 border-amber-900/30 bg-felt/80 shadow-inner">
+      <div className="relative flex-1 bg-gradient-to-br from-purple-900 via-purple-700 to-pink-800 dark:from-purple-950 dark:via-purple-900 dark:to-pink-950">
+        <div className="absolute inset-0 bg-gradient-to-t from-purple-500/20 via-transparent to-pink-500/20 animate-pulse-glow pointer-events-none" />
+        <div className="absolute inset-4 rounded-3xl border-4 border-purple-300/30 dark:border-purple-500/30 bg-gradient-to-br from-purple-800/80 via-purple-700/80 to-pink-800/80 dark:from-purple-900/80 dark:via-purple-800/80 dark:to-pink-900/80 shadow-2xl backdrop-blur-sm">
           {otherPlayers.map((player, i) => (
             <PlayerSeat
               key={player.id}
@@ -353,15 +354,15 @@ export default function GameTable() {
           {game.currentTrick.length > 0 && (
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-2">
               {game.currentTrick.map((played, i) => (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <span className="text-xs text-slate-400">
+                <div key={i} className="flex flex-col items-center gap-1 animate-float">
+                  <span className="text-xs text-purple-200 dark:text-purple-300 font-semibold">
                     {game.players.find((p) => p.id === played.playerId)?.username}
                   </span>
                   <div className="flex gap-0.5">
                     {played.cards.map((card, j) => (
                       <div
                         key={j}
-                        className="flex h-10 w-8 flex-col items-center justify-center rounded border border-slate-400 bg-white text-xs font-bold"
+                        className="flex h-10 w-8 flex-col items-center justify-center rounded-lg border-2 border-purple-300/50 bg-gradient-to-br from-white via-pink-50 to-purple-50 text-xs font-bold shadow-lg shadow-purple-500/30 transform hover:scale-110 transition-transform"
                       >
                         <span className={getSuitClass(card.suit)}>
                           {SUIT_SYMBOLS[card.suit] || ''}
@@ -384,7 +385,7 @@ export default function GameTable() {
         {/* 折叠按钮 */}
         <button
           onClick={() => setShowHand(!showHand)}
-          className="w-full py-2 flex items-center justify-center gap-2 bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+          className="w-full py-2 flex items-center justify-center gap-2 bg-gradient-to-r from-purple-700 via-pink-600 to-purple-700 text-white hover:from-purple-600 hover:via-pink-500 hover:to-purple-600 transition-all duration-300 shadow-lg shadow-purple-500/50"
         >
           {showHand ? (
             <EyeOff className="w-4 h-4" />
@@ -392,7 +393,7 @@ export default function GameTable() {
             <Eye className="w-4 h-4" />
           )}
           <span>{showHand ? '隐藏手牌' : '查看手牌'}</span>
-          <span className="text-xs bg-slate-600 px-2 py-0.5 rounded">{game.myHand?.length || 0} 张</span>
+          <span className="text-xs bg-purple-500/50 px-2 py-0.5 rounded-full border border-pink-300/30">{game.myHand?.length || 0} 张</span>
         </button>
 
         {/* 手牌区域 - 当有对话框或点击展开时显示 */}
@@ -444,11 +445,11 @@ export default function GameTable() {
         )}
 
         {/* 游戏控制按钮 */}
-        <div className="mt-3 rounded-lg border-2 border-amber-500/30 bg-gradient-to-r from-amber-950/20 via-amber-900/20 to-amber-950/20 p-4 shadow-lg">
+        <div className="mt-3 rounded-lg border-2 border-purple-400/30 bg-gradient-to-r from-purple-900/40 via-pink-900/40 to-purple-900/40 p-4 shadow-lg backdrop-blur-sm">
           {game.status === EGameStatus.WAITING && (
             <div className="flex flex-col items-center gap-3">
               <div className="text-center">
-                <p className="text-sm text-amber-200/80">
+                <p className="text-sm text-purple-200/90 dark:text-purple-100/90 font-medium">
                   等待玩家准备... ({readyStatusData?.readyStates?.filter(s => s.isReady).length || 0}/5 已准备)
                 </p>
                 <div className="mt-2 flex flex-wrap justify-center gap-2">
@@ -458,10 +459,10 @@ export default function GameTable() {
                     return (
                       <div
                         key={player.id}
-                        className={`rounded-full px-3 py-1 text-sm ${
+                        className={`rounded-full px-3 py-1 text-sm font-medium shadow-md transition-all ${
                           isReady
-                            ? 'bg-green-600/40 text-green-100'
-                            : 'bg-amber-900/40 text-amber-100'
+                            ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white animate-pulse-glow'
+                            : 'bg-gradient-to-r from-purple-500/50 to-pink-500/50 text-purple-100'
                         }`}
                       >
                         {player.username}
@@ -529,20 +530,23 @@ export default function GameTable() {
           {game.status === EGameStatus.DEALING && (
             <div className="flex flex-col items-center gap-3">
               <div className="text-center">
-                <p className="text-lg font-bold text-amber-100">发牌中...</p>
-                <p className="text-sm text-amber-200/80">
+                <p className="text-lg font-bold text-purple-100 dark:text-pink-100 animate-pulse">发牌中...</p>
+                <p className="text-sm text-purple-200/90 dark:text-purple-100/90">
                   已发 {game.dealtCardCount || 0}/{game.totalCardsPerPlayer || 31} 张/人
                 </p>
-                <div className="mt-2 w-64 h-2 bg-amber-900/50 rounded-full overflow-hidden">
+                <div className="mt-2 w-64 h-2 bg-purple-900/50 rounded-full overflow-hidden shadow-inner">
                   <div
-                    className="h-full bg-amber-500 transition-all duration-200"
-                    style={{ width: `${((game.dealtCardCount || 0) / 31) * 100}%` }}
+                    className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 transition-all duration-200 animate-shimmer shadow-lg shadow-pink-500/50"
+                    style={{
+                      width: `${((game.dealtCardCount || 0) / 31) * 100}%`,
+                      backgroundSize: '200% 100%'
+                    }}
                   />
                 </div>
               </div>
 
               {/* 发牌过程中可以抢庄 */}
-              <p className="text-xs text-amber-300/70">
+              <p className="text-xs text-purple-300/80 dark:text-pink-300/80">
                 可以在发牌过程中选择级牌进行抢庄
               </p>
 
@@ -615,8 +619,8 @@ export default function GameTable() {
               </Button>
             )}
             {game.status === EGameStatus.DISCARDING && game.dealerSeat !== game.myPosition && (
-              <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-4 text-center">
-                <p className="text-amber-200">等待庄家扣牌...</p>
+              <div className="rounded-lg border-2 border-purple-400/40 bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 text-center backdrop-blur-sm">
+                <p className="text-purple-200 dark:text-pink-200">等待庄家扣牌...</p>
               </div>
             )}
             {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
@@ -631,8 +635,8 @@ export default function GameTable() {
                     叫朋友
                   </Button>
                 ) : (
-                  <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-4 text-center">
-                    <p className="text-amber-200">请等待庄家选择花色</p>
+                  <div className="rounded-lg border-2 border-purple-400/40 bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 text-center backdrop-blur-sm">
+                    <p className="text-purple-200 dark:text-pink-200">请等待庄家选择花色</p>
                   </div>
                 )}
               </>
@@ -678,13 +682,13 @@ export default function GameTable() {
               </>
             )}
             {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (
-              <div className="rounded-lg border-2 border-blue-500/30 bg-blue-950/20 p-4 text-center">
-                <p className="text-blue-200">等待其他玩家出牌...</p>
+              <div className="rounded-lg border-2 border-purple-400/40 dark:border-pink-500/40 bg-gradient-to-r from-purple-900/30 to-pink-900/30 p-4 text-center backdrop-blur-sm animate-pulse">
+                <p className="text-purple-200 dark:text-pink-200">等待其他玩家出牌...</p>
               </div>
             )}
           </div>
           {selectedCardIndices.size > 0 && game.status === EGameStatus.PLAYING && (
-            <p className="mt-2 text-center text-sm text-amber-400">
+            <p className="mt-2 text-center text-sm text-purple-200 dark:text-pink-200 font-medium animate-pulse">
               已选择 {selectedCardIndices.size} 张牌，点击"出牌"按钮进行出牌
             </p>
           )}

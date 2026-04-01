@@ -34,13 +34,13 @@ export default function Home() {
   return (
     <div className="flex flex-col">
       <section className="relative overflow-hidden border-b border-border/40">
-        <div className="absolute inset-0 bg-gradient-to-b from-amber-950/20 via-background to-background" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-900/10 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/30 via-pink-900/20 to-background" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-purple-500/20 via-pink-500/10 to-transparent animate-pulse-glow" />
         <div className="relative mx-auto flex max-w-6xl flex-col items-center px-4 py-24 text-center md:py-32">
-          <div className="mb-6 flex items-center gap-3">
-            <Spade className="h-12 w-12 text-amber-500" />
+          <div className="mb-6 flex items-center gap-3 animate-float">
+            <Spade className="h-12 w-12 text-purple-500 dark:text-pink-500 drop-shadow-lg" />
             <h1 className="font-display text-5xl font-bold tracking-tight md:text-7xl">
-              <span className="bg-gradient-to-r from-amber-300 via-amber-500 to-amber-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-purple-400 via-pink-500 to-purple-600 bg-clip-text text-transparent animate-shimmer" style={{ backgroundSize: '200% 100%' }}>
                 升级
               </span>
             </h1>
@@ -84,9 +84,9 @@ export default function Home() {
           {FEATURES.map(({ icon: Icon, title, desc }) => (
             <div
               key={title}
-              className="group rounded-xl border border-border/50 bg-card p-6 transition-all hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/5"
+              className="group rounded-xl border border-border/50 bg-gradient-to-br from-card via-purple-50/20 to-pink-50/20 dark:from-card dark:via-purple-900/10 dark:to-pink-900/10 p-6 transition-all hover:border-purple-500/40 hover:shadow-xl hover:shadow-purple-500/20 hover:scale-105"
             >
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500 transition-colors group-hover:bg-amber-500/20">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 text-purple-600 dark:text-pink-500 transition-all group-hover:from-purple-500/30 group-hover:to-pink-500/30 group-hover:scale-110 shadow-lg shadow-purple-500/20">
                 <Icon className="h-6 w-6" />
               </div>
               <h3 className="mb-2 font-display text-lg font-semibold">{title}</h3>
@@ -101,8 +101,8 @@ export default function Home() {
           <h2 className="mb-8 text-center font-display text-3xl font-bold">快速了解规则</h2>
           <div className="mx-auto max-w-2xl space-y-4">
             {RULES.map((rule, i) => (
-              <div key={i} className="flex gap-4 rounded-lg border border-border/50 bg-background p-4">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/10 font-display text-sm font-bold text-amber-500">
+              <div key={i} className="flex gap-4 rounded-lg border border-purple-200/50 dark:border-purple-800/50 bg-gradient-to-r from-purple-50/50 to-pink-50/50 dark:from-purple-900/20 dark:to-pink-900/20 p-4 shadow-md hover:shadow-lg hover:shadow-purple-500/20 transition-all">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 font-display text-sm font-bold text-purple-600 dark:text-pink-500 shadow-inner">
                   {i + 1}
                 </span>
                 <p className="pt-1 text-sm text-muted-foreground">{rule}</p>

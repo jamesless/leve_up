@@ -37,3 +37,10 @@ test/
 *.test.go
 
 skills-lock.json
+
+# ChronoForge / Long-running memory
+claude-progress.txt
+claude-progress-archive.txt
+feature_list.json
+claude-long.exe
+init.sh
