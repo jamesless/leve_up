@@ -84,38 +84,26 @@
   }
 
   .dark body {
-    background-color: hsl(250, 45%, 18%);
-    background-image:
-      radial-gradient(circle at 10% 20%, hsla(270, 95%, 65%, 0.8) 0%, transparent 30%),
-      radial-gradient(circle at 90% 20%, hsla(330, 90%, 65%, 0.75) 0%, transparent 30%),
-      radial-gradient(circle at 90% 80%, hsla(200, 85%, 60%, 0.7) 0%, transparent 30%),
-      radial-gradient(circle at 10% 80%, hsla(280, 90%, 60%, 0.75) 0%, transparent 30%),
-      radial-gradient(circle at 50% 50%, hsla(250, 80%, 55%, 0.6) 0%, transparent 40%);
-    background-size: 100% 100%;
+    background: linear-gradient(135deg,
+      hsl(250, 60%, 25%) 0%,
+      hsl(280, 70%, 30%) 25%,
+      hsl(320, 65%, 28%) 50%,
+      hsl(260, 60%, 26%) 75%,
+      hsl(240, 65%, 24%) 100%
+    );
+    background-size: 400% 400%;
     background-attachment: fixed;
     position: relative;
     overflow-x: hidden;
+    animation: dreamyGradient 15s ease infinite;
   }
 
-  .dark body::after {
-    content: '♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣ ♠ ♥ ♦ ♣';
-    position: fixed;
-    width: 100%;
-    height: 100%;
-    top: 0;
-    left: 0;
-    font-size: 40px;
-    color: rgba(139, 92, 246, 0.15);
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-evenly;
-    align-items: center;
-    gap: 30px;
-    padding: 30px;
-    pointer-events: none;
-    z-index: 1;
-    line-height: 1;
+  @keyframes dreamyGradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
   }
+
 
   .dark body::before {
     content: '';
@@ -138,6 +126,237 @@
   .dark body > * {
     position: relative;
     z-index: 2;
+  }
+
+  /* 游戏大厅卡片文字 — 强化暗色模式可读性 */
+  .dark .aero-card {
+    --card-foreground: 0 0% 92%;
+  }
+
+  .dark .aero-card .text-muted-foreground {
+    color: rgba(200, 210, 230, 0.75) !important;
+  }
+
+  .dark .aero-card .text-card-foreground,
+  .dark .aero-card h1,
+  .dark .aero-card h2,
+  .dark .aero-card h3 {
+    color: rgba(245, 245, 255, 0.92) !important;
+  }
+
+  /* 游戏大厅页面背景 - 扑克牌背纹理 + 主页色调白色梦幻泡沫 */
+  .game-lobby-page {
+    background:
+      radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.08) 10%, transparent 24%),
+      radial-gradient(circle at 82% 16%, hsl(var(--secondary) / 0.18) 0%, rgba(255, 255, 255, 0.06) 12%, transparent 26%),
+      radial-gradient(circle at 28% 78%, hsl(var(--primary) / 0.20) 0%, rgba(255, 255, 255, 0.05) 12%, transparent 28%),
+      radial-gradient(circle at 76% 74%, hsl(var(--accent) / 0.18) 0%, rgba(255, 255, 255, 0.05) 11%, transparent 24%),
+      radial-gradient(circle at 52% 38%, rgba(255, 255, 255, 0.12) 0%, transparent 18%),
+      linear-gradient(135deg,
+        hsl(var(--background)) 0%,
+        hsl(var(--primary) / 0.14) 30%,
+        hsl(var(--secondary) / 0.12) 62%,
+        hsl(var(--accent) / 0.10) 100%
+      );
+  }
+
+  .game-lobby-page::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(45deg,
+        transparent 44%,
+        rgba(255, 255, 255, 0.06) 48%,
+        rgba(255, 255, 255, 0.06) 52%,
+        transparent 56%
+      ),
+      linear-gradient(-45deg,
+        transparent 44%,
+        rgba(255, 255, 255, 0.05) 48%,
+        rgba(255, 255, 255, 0.05) 52%,
+        transparent 56%
+      ),
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.08) 0 1.5px, transparent 1.6px);
+    background-size: 34px 34px, 34px 34px, 24px 24px;
+    background-position: 0 0, 17px 17px, 12px 12px;
+    opacity: 0.55;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  .game-lobby-page::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 24%, rgba(255, 255, 255, 0.18) 0%, transparent 16%),
+      radial-gradient(circle at 74% 30%, hsl(var(--secondary) / 0.12) 0%, transparent 18%),
+      radial-gradient(circle at 38% 68%, hsl(var(--primary) / 0.12) 0%, transparent 20%),
+      radial-gradient(circle at 82% 78%, rgba(255, 255, 255, 0.12) 0%, transparent 16%);
+    filter: blur(24px);
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  .game-lobby-page > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 游戏大厅容器玻璃效果 - 扑克牌背纹理 + 梦幻泡沫 */
+  .game-lobby-container {
+    background-image:
+      radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.07) 12%, transparent 24%),
+      radial-gradient(circle at 82% 22%, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 10%, transparent 22%),
+      radial-gradient(circle at 32% 72%, hsl(var(--secondary) / 0.16) 0%, rgba(255, 255, 255, 0.04) 12%, transparent 26%),
+      radial-gradient(circle at 76% 78%, hsl(var(--accent) / 0.15) 0%, rgba(255, 255, 255, 0.04) 10%, transparent 24%),
+      radial-gradient(circle at 52% 38%, hsl(var(--primary) / 0.18) 0%, rgba(255, 255, 255, 0.05) 13%, transparent 28%),
+      linear-gradient(45deg,
+        transparent 45%,
+        rgba(255, 255, 255, 0.05) 49%,
+        rgba(255, 255, 255, 0.05) 51%,
+        transparent 55%
+      ),
+      linear-gradient(-45deg,
+        transparent 45%,
+        rgba(255, 255, 255, 0.04) 49%,
+        rgba(255, 255, 255, 0.04) 51%,
+        transparent 55%
+      ),
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.05) 0 1.2px, transparent 1.3px);
+    background-size: auto, auto, auto, auto, auto, 30px 30px, 30px 30px, 18px 18px;
+    background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 15px 15px, 9px 9px;
+  }
+
+  /* 游戏桌面容器 - 梦幻气泡纹理（主页色调+白色） */
+  .game-table-container {
+    background-image:
+      /* 白色气泡 */
+      radial-gradient(circle at 12% 15%, rgba(255, 255, 255, 0.12) 0%, transparent 22%),
+      radial-gradient(circle at 88% 25%, rgba(255, 255, 255, 0.10) 0%, transparent 20%),
+      radial-gradient(circle at 35% 65%, rgba(255, 255, 255, 0.11) 0%, transparent 24%),
+      radial-gradient(circle at 72% 78%, rgba(255, 255, 255, 0.09) 0%, transparent 18%),
+      radial-gradient(circle at 20% 88%, rgba(255, 255, 255, 0.10) 0%, transparent 21%),
+      /* 紫色气泡 (主页色调 - primary) */
+      radial-gradient(circle at 45% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 28%),
+      radial-gradient(circle at 68% 42%, rgba(168, 85, 247, 0.06) 0%, transparent 25%),
+      radial-gradient(circle at 15% 55%, rgba(147, 51, 234, 0.07) 0%, transparent 26%),
+      /* 粉色气泡 (主页色调 - accent) */
+      radial-gradient(circle at 82% 10%, rgba(236, 72, 153, 0.07) 0%, transparent 23%),
+      radial-gradient(circle at 28% 38%, rgba(244, 114, 182, 0.06) 0%, transparent 20%),
+      radial-gradient(circle at 92% 68%, rgba(251, 113, 133, 0.05) 0%, transparent 22%),
+      /* 蓝色气泡 (主页色调 - secondary) */
+      radial-gradient(circle at 58% 8%, rgba(59, 130, 246, 0.06) 0%, transparent 19%),
+      radial-gradient(circle at 8% 72%, rgba(96, 165, 250, 0.07) 0%, transparent 24%),
+      radial-gradient(circle at 78% 92%, rgba(56, 189, 248, 0.05) 0%, transparent 21%);
+  }
+
+  .game-lobby-container::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background:
+      linear-gradient(135deg,
+        transparent 0%,
+        transparent 38%,
+        rgba(255, 255, 255, 0.12) 43%,
+        rgba(255, 255, 255, 0.18) 48%,
+        rgba(255, 255, 255, 0.22) 50%,
+        rgba(255, 255, 255, 0.18) 52%,
+        rgba(255, 255, 255, 0.12) 57%,
+        transparent 62%,
+        transparent 100%
+      );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .game-lobby-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.08) 50%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .game-lobby-container > * {
+    position: relative;
+    z-index: 2;
+  }
+
+  /* 房间卡片 Aero 玻璃效果 */
+  .aero-card::before {
+    content: '';
+    position: absolute;
+    top: -100%;
+    left: -100%;
+    width: 300%;
+    height: 300%;
+    background:
+      linear-gradient(120deg,
+        transparent 0%,
+        transparent 33%,
+        rgba(255, 255, 255, 0.08) 38%,
+        rgba(255, 255, 255, 0.15) 43%,
+        rgba(255, 255, 255, 0.2) 48%,
+        rgba(255, 255, 255, 0.15) 53%,
+        rgba(255, 255, 255, 0.08) 58%,
+        transparent 63%,
+        transparent 100%
+      );
+    pointer-events: none;
+    z-index: 0;
+    transition: transform 0.6s ease-out;
+  }
+
+  .aero-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.12) 0%,
+      rgba(255, 255, 255, 0.06) 60%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 悬停时光影动画 */
+  .aero-card.group:hover::before {
+    animation: aeroShine 0.8s ease-out;
+  }
+
+  @keyframes aeroShine {
+    0% {
+      transform: translate(-10%, -10%);
+    }
+    50% {
+      transform: translate(5%, 5%);
+    }
+    100% {
+      transform: translate(0%, 0%);
+    }
+  }
+
+  .aero-card > * {
+    position: relative;
+    z-index: 1;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -167,6 +386,11 @@
       inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
   }
 
+  /* 玻璃卡片上的 muted 文字改为更清晰的颜色 */
+  .dark .glass-card .text-muted-foreground {
+    color: hsl(230, 15%, 80%) !important;
+  }
+
   .glass-strong {
     background: rgba(255, 255, 255, 0.15);
     backdrop-filter: blur(30px) saturate(200%);
@@ -177,9 +401,14 @@
   }
 
   .glass-light {
-    background: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.72);
     backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.5);
+    color: hsl(230, 15%, 25%);
+  }
+
+  .dark .glass-light {
+    color: hsl(230, 15%, 92%);
   }
 
   /* Colored glass variants */
@@ -222,4 +451,355 @@
   .glow-pink {
     box-shadow: 0 0 40px rgba(255, 100, 200, 0.4);
   }
+
+
+  /* ============================
+     冰块包裹图标容器
+     ============================ */
+  .crystal-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1.25rem;
+    overflow: visible;
+  }
+
+  /* ---- Win7 Aero 毛玻璃容器 ---- */
+  .crystal-icon {
+    position: relative;
+    z-index: 0;
+  }
+
+  /* 底层：柔和白色毛玻璃 */
+  .crystal-icon::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+    animation: glass-aero 4s ease-in-out infinite;
+  }
+
+  /* 顶层：左上角高光 — Win7 Aero 标志性特征 */
+  .crystal-icon::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(
+        150deg,
+        rgba(255, 255, 255, 0.5) 0%,
+        rgba(255, 255, 255, 0.18) 18%,
+        rgba(255, 255, 255, 0.04) 40%,
+        transparent 60%
+      );
+    pointer-events: none;
+    z-index: 3;
+    animation: glass-aero 4s ease-in-out infinite;
+  }
+
+  /* 极轻微的柔和外发光 — 融入背景即可，不要彩色 */
+  .crystal-icon {
+    box-shadow:
+      0 2px 16px rgba(0, 0, 0, 0.08),
+      0 8px 32px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+    animation: glass-aero 4s ease-in-out infinite;
+  }
+
+  /* 边缘彩虹 — 大幅削弱，只留极淡一圈 */
+  .crystal-icon .glass-edge {
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from 0deg,
+      rgba(200, 220, 255, 0.15),
+      rgba(180, 200, 240, 0.1),
+      rgba(160, 190, 240, 0.08),
+      rgba(180, 200, 240, 0.1),
+      rgba(200, 220, 255, 0.15)
+    );
+    opacity: 0.5;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  /* 呼吸动画 — 极轻微，只在高光上微动 */
+  @keyframes glass-aero {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.025);
+      opacity: 0.95;
+    }
+  }
+
+  /* 悬停：轻微软化 */
+  .crystal-icon:hover {
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+  }
+
+  /* ---- 图标：自然柔和白光，无彩色 ---- */
+  .crystal-icon .spade-icon {
+    position: relative;
+    z-index: 4;
+    color: rgba(255, 255, 255, 0.92);
+    filter:
+      drop-shadow(0 0 6px rgba(200, 215, 255, 0.5))
+      drop-shadow(0 0 2px rgba(255, 255, 255, 0.8));
+    animation: spade-glow 4s ease-in-out infinite;
+  }
+
+  @keyframes spade-glow {
+    0%, 100% {
+      opacity: 0.92;
+      filter:
+        drop-shadow(0 0 6px rgba(200, 215, 255, 0.5))
+        drop-shadow(0 0 2px rgba(255, 255, 255, 0.8));
+    }
+    50% {
+      opacity: 1;
+      filter:
+        drop-shadow(0 0 9px rgba(200, 215, 255, 0.65))
+        drop-shadow(0 0 3px rgba(255, 255, 255, 0.9));
+    }
+  }
+
+  /* ============================
+     氛围粒子 — 极淡
+     ============================ */
+  .crystal-particles {
+    position: absolute;
+    inset: -6px;
+    pointer-events: none;
+    z-index: 5;
+    overflow: visible;
+  }
+
+  .crystal-particles::before,
+  .crystal-particles::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(220, 235, 255, 0.6) 0%, rgba(200, 220, 255, 0.2) 50%, transparent 70%);
+    animation: aero-particle 5s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .crystal-particles::before {
+    width: 4px; height: 4px;
+    top: 15%; left: 20%;
+  }
+
+  .crystal-particles::after {
+    width: 3px; height: 3px;
+    bottom: 20%; right: 15%;
+    animation-delay: 2s;
+  }
+
+  @keyframes aero-particle {
+    0%, 100% { opacity: 0; transform: translateY(0px); }
+    20% { opacity: 0.5; transform: translateY(-6px); }
+    60% { opacity: 0.3; transform: translateY(-16px); }
+    80% { opacity: 0; transform: translateY(-24px); }
+  }
+
+  .particle-dot {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(220, 235, 255, 0.55) 0%, rgba(200, 220, 255, 0.15) 60%, transparent 80%);
+    pointer-events: none;
+    animation: aero-particle var(--duration, 4s) ease-in-out infinite;
+    animation-delay: var(--delay, 0s);
+    opacity: 0;
+  }
+
+  .particle-dot:nth-child(1) { width: 3px; height: 3px; top: 30%; left: 8%; --duration: 4s; --delay: 0.5s; }
+  .particle-dot:nth-child(2) { width: 2px; height: 2px; top: 60%; left: 12%; --duration: 5s; --delay: 1s; }
+  .particle-dot:nth-child(3) { width: 3px; height: 3px; bottom: 35%; right: 8%; --duration: 4.5s; --delay: 2.2s; }
+  .particle-dot:nth-child(4) { width: 2px; height: 2px; bottom: 18%; left: 25%; --duration: 5.5s; --delay: 0.8s; }
+  .particle-dot:nth-child(5) { width: 2px; height: 2px; top: 12%; right: 22%; --duration: 3.8s; --delay: 2.8s; }
+
+
+  .particle-dot:nth-child(1) { width: 4px; height: 4px; top: 30%; left: 5%; --duration: 3.5s; --delay: 0.3s; }
+  .particle-dot:nth-child(2) { width: 3px; height: 3px; top: 60%; left: 10%; --duration: 4.8s; --delay: 0.8s; }
+  .particle-dot:nth-child(3) { width: 4px; height: 4px; bottom: 35%; right: 5%; --duration: 4.2s; --delay: 2s; }
+  .particle-dot:nth-child(4) { width: 2px; height: 2px; bottom: 15%; left: 25%; --duration: 5.5s; --delay: 1s; }
+  .particle-dot:nth-child(5) { width: 2px; height: 2px; top: 10%; right: 20%; --duration: 3.8s; --delay: 2.5s; }
+
+
+  /* ============================
+     毛玻璃徽章 — 用于暗色背景上的标签
+     ============================ */
+  .glass-badge {
+    position: relative;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 2px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .dark .glass-badge {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* 徽章左上角高光 */
+  .glass-badge::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.25) 0%,
+      rgba(255, 255, 255, 0.05) 30%,
+      transparent 55%
+    );
+    pointer-events: none;
+  }
+
+  /* ============================
+     登录注册页动态粒子背景
+     ============================ */
+  .auth-particle-bg {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 粒子层容器 */
+  .auth-particle-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(168, 85, 247, 0.06) 0%, transparent 40%),
+      radial-gradient(circle at 80% 20%, rgba(236, 72, 153, 0.05) 0%, transparent 35%),
+      radial-gradient(circle at 50% 70%, rgba(59, 130, 246, 0.04) 0%, transparent 30%);
+    pointer-events: none;
+    animation: bg-drift 20s ease-in-out infinite;
+  }
+
+  @keyframes bg-drift {
+    0%, 100% {
+      background-position: 0% 0%, 0% 0%, 0% 0%;
+    }
+    33% {
+      background-position: 2% -1%, -1% 2%, 1% -1%;
+    }
+    66% {
+      background-position: -1% 1%, 2% -1%, -1% 1%;
+    }
+  }
+
+  /* 粒子点阵层 */
+  .auth-particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+
+  /* 大粒子光晕球 */
+  .auth-particles::before {
+    content: '';
+    position: absolute;
+    width: 320px;
+    height: 320px;
+    top: -80px;
+    left: -80px;
+    background:
+      radial-gradient(circle at 30% 50%, rgba(168, 85, 247, 0.12) 0%, transparent 50%),
+      radial-gradient(circle at 70% 30%, rgba(236, 72, 153, 0.09) 0%, transparent 40%);
+    animation: particle-orbit-1 25s linear infinite;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  .auth-particles::after {
+    content: '';
+    position: absolute;
+    width: 280px;
+    height: 280px;
+    bottom: -60px;
+    right: -60px;
+    background:
+      radial-gradient(circle at 60% 40%, rgba(59, 130, 246, 0.10) 0%, transparent 45%),
+      radial-gradient(circle at 30% 70%, rgba(168, 85, 247, 0.07) 0%, transparent 35%);
+    animation: particle-orbit-2 30s linear infinite;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  @keyframes particle-orbit-1 {
+    0%   { transform: translate(0, 0) rotate(0deg); }
+    25%  { transform: translate(30px, 20px) rotate(90deg); }
+    50%  { transform: translate(10px, 40px) rotate(180deg); }
+    75%  { transform: translate(-20px, 15px) rotate(270deg); }
+    100% { transform: translate(0, 0) rotate(360deg); }
+  }
+
+  @keyframes particle-orbit-2 {
+    0%   { transform: translate(0, 0) rotate(0deg); }
+    33%  { transform: translate(-25px, -30px) rotate(120deg); }
+    66%  { transform: translate(20px, -15px) rotate(240deg); }
+    100% { transform: translate(0, 0) rotate(360deg); }
+  }
+
+  /* 浮动粒子 dots */
+  .auth-particle {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.8) 0%, rgba(200, 190, 255, 0.4) 50%, transparent 70%);
+    pointer-events: none;
+    animation: auth-float 8s ease-in-out infinite;
+    animation-delay: 0s;
+  }
+
+  @keyframes auth-float {
+    0%   { opacity: 0;   transform: translateY(0px)   scale(0.3); }
+    15%  { opacity: 0.8;  transform: translateY(-15px) scale(1); }
+    50%  { opacity: 0.4;  transform: translateY(-60px) scale(0.6); }
+    85%  { opacity: 0.15; transform: translateY(-100px) scale(0.4); }
+    100% { opacity: 0;    transform: translateY(-120px) scale(0.2); }
+  }
+
+  /* 20 个粒子分布在整个页面（作为 .auth-particles 的子元素） */
+  .auth-particles .auth-particle:nth-child(1)  { width: 3px; height: 3px; left: 5%;  top: 80%; animation-delay: 0s;    animation-duration: 9s;  }
+  .auth-particles .auth-particle:nth-child(2)  { width: 2px; height: 2px; left: 12%; top: 90%; animation-delay: 1.2s;  animation-duration: 7s;  }
+  .auth-particles .auth-particle:nth-child(3)  { width: 4px; height: 4px; left: 20%; top: 85%; animation-delay: 0.5s;  animation-duration: 11s; }
+  .auth-particles .auth-particle:nth-child(4)  { width: 2px; height: 2px; left: 28%; top: 95%; animation-delay: 2.1s;  animation-duration: 8s;  }
+  .auth-particles .auth-particle:nth-child(5)  { width: 3px; height: 3px; left: 36%; top: 88%; animation-delay: 0.8s;  animation-duration: 10s; }
+  .auth-particles .auth-particle:nth-child(6)  { width: 2px; height: 2px; left: 44%; top: 92%; animation-delay: 3.0s;  animation-duration: 9s;  }
+  .auth-particles .auth-particle:nth-child(7)  { width: 3px; height: 3px; left: 52%; top: 80%; animation-delay: 1.5s;  animation-duration: 8s;  }
+  .auth-particles .auth-particle:nth-child(8)  { width: 2px; height: 2px; left: 60%; top: 96%; animation-delay: 0.3s;  animation-duration: 12s; }
+  .auth-particles .auth-particle:nth-child(9)  { width: 4px; height: 4px; left: 68%; top: 85%; animation-delay: 2.5s;  animation-duration: 7s;  }
+  .auth-particles .auth-particle:nth-child(10) { width: 2px; height: 2px; left: 76%; top: 91%; animation-delay: 1.8s;  animation-duration: 10s; }
+  .auth-particles .auth-particle:nth-child(11) { width: 3px; height: 3px; left: 84%; top: 87%; animation-delay: 0.7s;  animation-duration: 9s;  }
+  .auth-particles .auth-particle:nth-child(12) { width: 2px; height: 2px; left: 92%; top: 94%; animation-delay: 3.5s;  animation-duration: 8s;  }
+  .auth-particles .auth-particle:nth-child(13) { width: 3px; height: 3px; left: 8%;  top: 70%; animation-delay: 4.0s;  animation-duration: 11s; }
+  .auth-particles .auth-particle:nth-child(14) { width: 2px; height: 2px; left: 48%; top: 75%; animation-delay: 2.8s;  animation-duration: 9s;  }
+  .auth-particles .auth-particle:nth-child(15) { width: 3px; height: 3px; left: 72%; top: 72%; animation-delay: 1.0s;  animation-duration: 10s; }
+  .auth-particles .auth-particle:nth-child(16) { width: 2px; height: 2px; left: 16%; top: 65%; animation-delay: 3.2s;  animation-duration: 8s;  }
+  .auth-particles .auth-particle:nth-child(17) { width: 3px; height: 3px; left: 88%; top: 68%; animation-delay: 0.2s;  animation-duration: 9s;  }
+  .auth-particles .auth-particle:nth-child(18) { width: 2px; height: 2px; left: 35%; top: 60%; animation-delay: 4.5s;  animation-duration: 7s;  }
+  .auth-particles .auth-particle:nth-child(19) { width: 4px; height: 4px; left: 55%; top: 55%; animation-delay: 1.3s;  animation-duration: 12s; }
+  .auth-particles .auth-particle:nth-child(20) { width: 2px; height: 2px; left: 25%; top: 50%; animation-delay: 2.0s;  animation-duration: 8s;  }
 }

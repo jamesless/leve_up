@@ -1,5 +1,5 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff, History } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, Film, Eye, EyeOff, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
@@ -11,7 +11,6 @@ import PlayedCardsHistoryDialog from '@/components/game/PlayedCardsHistoryDialog
 import {
   useGameTable,
   usePlayCards,
-  usePassTurn,
   useAiPlay,
   useStartSinglePlayerGame,
   useCallDealer,
@@ -60,7 +59,6 @@ export default function GameTable() {
 
   const { data, isLoading, isError } = useGameTable(gameId);
   const playCards = usePlayCards(gameId);
-  const passTurn = usePassTurn(gameId);
   const aiPlay = useAiPlay(gameId);
   const callDealerMutation = useCallDealer(gameId);
   const passCallMutation = usePassCall(gameId);
@@ -245,13 +243,6 @@ export default function GameTable() {
     );
   };
 
-  const handlePass = () => {
-    passTurn.mutate(
-      undefined,
-      { onSuccess: () => clearSelection() },
-    );
-  };
-
   const handleCallDealer = (cardIndices: number[]) => {
     callDealerMutation.mutate(
       { cardIndices },
@@ -338,12 +329,7 @@ export default function GameTable() {
         </div>
       </div>
 
-      <div className="relative flex-1 bg-gradient-to-br from-background via-background to-card">
-        {/* Soft Glassmorphism Background */}
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(150,100,255,0.08),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_80%,rgba(100,150,255,0.08),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(255,100,200,0.08),transparent_60%)]" />
-
+      <div className="relative flex-1 bg-gradient-to-br from-background via-background to-card game-table-container">
         {/* Main Table Surface - Enhanced Glass */}
         <div className="absolute inset-4 rounded-3xl glass-card relative overflow-hidden">
           {/* Subtle Border Glow */}
@@ -681,21 +667,6 @@ export default function GameTable() {
                     查看已出牌
                   </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="gap-2 text-base"
-                  onClick={handlePass}
-                  disabled={passTurn.isPending}
-                >
-                  {passTurn.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <SkipForward className="h-5 w-5" />}
-                  不出
-                </Button>
-                {passTurn.isError && (
-                  <p className="mt-2 text-center text-sm text-red-400">
-                    操作失败，请重试
-                  </p>
-                )}
               </>
             )}
             {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (

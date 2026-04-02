@@ -46,10 +46,9 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
 
   return (
     <Card
-      className={`relative transition-all duration-300 bg-gradient-to-br from-purple-950/10 via-purple-900/5 to-pink-950/10 border-purple-500/40 hover:border-purple-400/80 backdrop-blur-xl shadow-xl shadow-purple-900/10 hover:shadow-purple-500/50 hover:shadow-2xl ${
-        canJoin ? 'cursor-pointer hover:bg-gradient-to-br hover:from-purple-950/15 hover:via-purple-900/10 hover:to-pink-950/15 group' : ''
+      className={`relative overflow-hidden transition-all duration-300 bg-white/5 border-white/30 hover:border-white/50 backdrop-blur-2xl shadow-xl hover:shadow-2xl aero-card ${
+        canJoin ? 'cursor-pointer hover:bg-white/8 group' : ''
       }`}
-      style={{ backgroundColor: 'rgba(88, 28, 135, 0.02)' }}
       onClick={() => canJoin && onJoin(game.id)}
     >
       <CardHeader className="pb-3">
@@ -159,7 +158,8 @@ export default function GameLobby() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="game-lobby-page relative min-h-screen overflow-hidden">
+      <div className="mx-auto max-w-4xl px-4 py-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -235,7 +235,7 @@ export default function GameLobby() {
         </Card>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-3 rounded-xl p-6 relative overflow-hidden bg-white/5 backdrop-blur-xl border border-white/20 shadow-2xl game-lobby-container">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold">房间列表</h2>
           <Button
@@ -341,6 +341,7 @@ export default function GameLobby() {
       {joinGame.isError && (
         <p className="mt-4 text-sm text-destructive">{joinGame.error.message}</p>
       )}
+      </div>
     </div>
   );
 }
