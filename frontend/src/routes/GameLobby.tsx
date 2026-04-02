@@ -159,6 +159,12 @@ export default function GameLobby() {
 
   return (
     <div className="game-lobby-page relative min-h-screen overflow-hidden">
+      {/* 舞台灯光背景层 */}
+      <div className="lobby-stage-lights">
+        <div className="lobby-light-1" />
+        <div className="lobby-light-2" />
+        <div className="lobby-light-3" />
+      </div>
       <div className="mx-auto max-w-4xl px-4 py-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
