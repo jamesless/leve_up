@@ -498,10 +498,10 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 			},
 		})
 
-		// 如果之前是calling_friend状态，进入playing状态
+		// 独打模式下庄家仍然需要扣底牌（38张扣7张剩31张），先进入discarding状态
 		if table.Status == "calling_friend" {
-			table.Status = "playing"
-			table.CurrentPlayer = table.DealerSeat // 庄家先出牌
+			table.Status = "discarding"
+			table.CurrentPlayer = table.DealerSeat // 庄家扣底
 			table.CallPhase = "finished"
 			table.UpdatedAt = time.Now()
 		}
@@ -1587,68 +1587,48 @@ func sortCards(cards []Card) []Card {
 }
 
 // CalculateLevelUp determines how many levels to advance based on score
-// 规则：60分一级，总分300分
+// 规则：闲家得分决定升级，闲家永不降级
 // 正常局升级表（庄家找到盟友，2打3）
-// | 抓分范围 | 结果 | 庄家方升级 | 抓分方升级 |
-// | 0 分 | 大光 | 连升 3 级 | 不升级 |
-// | 1 - 59 分 | 小光 | 连升 2 级 | 不升级 |
-// | 60 - 119 分 | 小胜 | 升 1 级 | 不升级 |
+// | 闲家得分范围 | 结果 | 庄家方升级 | 闲家升级 |
+// | 0 - 119 分  | 庄胜 | 升 1 级 | 不升级 |
 // | 120 - 179 分 | 反超 | 不升级 | 每人升 1 级 |
 // | 180 - 239 分 | 大胜 | 不升级 | 每人升 2 级 |
 // | 240 - 299 分 | 完胜 | 不升级 | 每人升 3 级 |
 // | 300 分 | 满光 | 不升级 | 每人升 4 级 |
 //
 // 独打局升级表（庄家 1 打 4）
-// | 抓分范围 | 结果 | 庄家升级 | 抓分方升级 |
-// | 0 分 | 大光 | 升 9 级 | 不升级 |
-// | 1 - 59 分 | 小光 | 升 6 级 | 不升级 |
-// | 60 - 119 分 | 小胜 | 升 3 级 | 不升级 |
+// | 闲家得分范围 | 结果 | 庄家升级 | 闲家升级 |
+// | 0 - 119 分  | 庄胜 | 升 1 级 | 不升级 |
 // | 120 - 179 分 | 反超 | 不升级 | 每人升 1 级 |
-// | 180 分及以上 | 惨败 | 不升级 | 每人升 2 级 |
+// | 180 分及以上 | 大胜 | 不升级 | 每人升 2 级 |
 func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
 	if isSolo {
 		// 独打局（庄家 1 打 4）
 		if winnerIsDefender {
-			// 庄家（防守方）获胜
-			if score == 0 {
-				return 9 // 大光，升 9 级
-			} else if score <= 59 {
-				return 6 // 小光，升 6 级
-			} else if score <= 119 {
-				return 3 // 小胜（60-119分），升 3 级
-			}
-			// 如果 score >= 120，不应该到这里（应该是抓分方获胜）
-			return 0 // 安全保护，不应该发生
+			// 庄家（防守方）获胜：闲家得分 0-119，庄家升 1 级
+			return 1
 		} else {
-			// 抓分方获胜
+			// 闲家获胜
 			if score >= 180 {
-				return 2 // 惨败，抓分方每人升 2 级
+				return 2 // 大胜，闲家每人升 2 级
 			}
-			return 1 // 反超（120-179分），抓分方每人升 1 级
+			return 1 // 反超（120-179分），闲家每人升 1 级
 		}
 	} else {
 		// 正常局（庄家找到盟友，2 打 3）
 		if winnerIsDefender {
-			// 庄家方获胜
-			if score == 0 {
-				return 3 // 大光，庄家方连升 3 级
-			} else if score <= 59 {
-				return 2 // 小光，庄家方连升 2 级
-			} else if score <= 119 {
-				return 1 // 小胜（60-119分），庄家方升 1 级
-			}
-			// 如果 score >= 120，不应该到这里（应该是抓分方获胜）
-			return 0 // 安全保护，不应该发生
+			// 庄家方获胜：闲家得分 0-119，庄家升 1 级
+			return 1
 		} else {
-			// 抓分方获胜
+			// 闲家获胜
 			if score >= 300 {
-				return 4 // 满光，抓分方每人升 4 级
+				return 4 // 满光，闲家每人升 4 级
 			} else if score >= 240 {
-				return 3 // 完胜，抓分方每人升 3 级
+				return 3 // 完胜，闲家每人升 3 级
 			} else if score >= 180 {
-				return 2 // 大胜，抓分方每人升 2 级
+				return 2 // 大胜，闲家每人升 2 级
 			}
-			return 1 // 反超（120-179分），抓分方每人升 1 级
+			return 1 // 反超（120-179分），闲家每人升 1 级
 		}
 	}
 }
@@ -2168,6 +2148,8 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		if allCardsPlayed {
 			// Game ended - calculate final scores and results
 			result.GameEnded = true
+			table.Status = "finished"
+			UpdateGameStatus(gameID, "finished")
 
 			// Calculate total points collected by non-host team
 			totalPoints := 0

@@ -18,6 +18,7 @@ export interface IPlayer {
   isAI: boolean;
   cardCount: number;
   level: string;
+  isFriend?: boolean;
 }
 
 export interface IRoom {
