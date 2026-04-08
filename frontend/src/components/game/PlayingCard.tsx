@@ -60,26 +60,26 @@ export default function PlayingCard({
       className={cn(
         'relative flex flex-col rounded-xl glass-card shadow-md transition-all duration-200',
         SIZE_CLASSES[size],
-        onClick && 'cursor-pointer hover:-translate-y-2 hover:shadow-xl hover:glass-strong active:translate-y-0',
+        onClick && 'cursor-pointer hover:-translate-y-2 hover:shadow-xl active:translate-y-0',
         selected
-          ? 'border-2 border-primary/60 -translate-y-3 shadow-lg shadow-primary/30 ring-2 ring-primary/40 glow-soft'
+          ? 'border-2 border-purple-400/70 -translate-y-3 shadow-lg shadow-purple-500/40 ring-2 ring-purple-400/50'
           : isTrumpRank
-            ? 'border-2 border-secondary/60 ring-2 ring-secondary/40 shadow-secondary/30 glow-blue'
+            ? 'border-2 border-blue-400/60 ring-2 ring-blue-400/40 shadow-blue-500/30'
             : isTrump
-              ? 'border-2 border-accent/60 ring-2 ring-accent/40 shadow-accent/30 glow-pink'
-              : 'border-2 border-white/20',
+              ? 'border-2 border-pink-400/60 ring-2 ring-pink-400/40 shadow-pink-500/30'
+              : 'border-2 border-white/20 hover:border-white/35 hover:shadow-lg hover:shadow-white/10',
         className,
       )}
     >
       {/* 主牌标签 */}
       {showTrumpLabel && (
-        <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-lg glass-card bg-accent/90 px-2 py-1 text-[10px] font-bold text-white shadow-md border border-white/30">
+        <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-lg backdrop-blur-md bg-pink-500/80 border border-pink-300/40 px-2 py-0.5 text-[10px] font-bold text-white shadow-lg shadow-pink-500/30">
           主
         </div>
       )}
       {/* 盟友牌标签 */}
       {isFriend && (
-        <div className="absolute -right-1 -top-1 rounded-full glass-card bg-primary/90 px-2 py-1 text-[10px] font-bold text-white shadow-md border border-white/30">
+        <div className="absolute -right-1 -top-1 rounded-full backdrop-blur-md bg-purple-600/90 border border-purple-300/40 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-lg shadow-purple-500/30">
           友
         </div>
       )}

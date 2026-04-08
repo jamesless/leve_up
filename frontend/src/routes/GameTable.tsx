@@ -2,7 +2,6 @@ import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils';
 import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import PlayerHand from '@/components/game/PlayerHand';
 import PlayerSeat from '@/components/game/PlayerSeat';
 import CallDealerDialog from '@/components/game/CallDealerDialog';
@@ -27,7 +26,7 @@ import {
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
 import { EGameStatus, ECardSuit } from '@/types';
-import { useEffect, useRef, useState} from 'react';
+import React, { useEffect, useRef, useState} from 'react';
 
 const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
 
@@ -92,6 +91,7 @@ export default function GameTable() {
     const [showCallDialog, setShowCallDialog] = useState(false);
     const [showDiscardDialog, setShowDiscardDialog] = useState(false);
     const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
+    const [callFriendMinimized, setCallFriendMinimized] = useState(false); // 叫朋友对话框是否被最小化
     const [showHand, setShowHand] = useState(true); // 控制手牌显示/隐藏
 
     useEffect(() => {
@@ -128,6 +128,7 @@ export default function GameTable() {
             // 只有庄家才会自动弹出叫朋友对话框
             if (game.dealerSeat === game.myPosition) {
                 setShowCallFriendDialog(true);
+                setCallFriendMinimized(false); // 重置最小化状态
             } else {
                 setShowCallFriendDialog(false);
             }
@@ -282,8 +283,8 @@ export default function GameTable() {
 
     return (
         <div className="flex min-h-[calc(100vh-4rem)] flex-col">
-            <div className="flex flex-wrap items-center justify-between border-b border-border/40 px-2 sm:px-4 py-1 sm:py-2 gap-1">
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => navigate('/game')}>
+            <div className="flex flex-wrap items-center justify-between border-b border-white/10 px-2 sm:px-4 py-1.5 sm:py-2 gap-1 bg-black/20 backdrop-blur-sm">
+                <Button variant="ghost" size="sm" className="gap-1 text-white/80 hover:text-white hover:bg-white/10" onClick={() => navigate('/game')}>
                     <ArrowLeft className="h-4 w-4" />
                     <span className="hidden sm:inline">返回</span>
                 </Button>
@@ -291,13 +292,18 @@ export default function GameTable() {
                     <Button
                         variant="outline"
                         size="sm"
-                        className="gap-1 hidden sm:flex"
+                        className="gap-1 hidden sm:flex glass border-white/20 text-white/80 hover:bg-white/10 hover:text-white"
                         onClick={() => navigate(`/game/replay/${gameId}`)}
                     >
                         <Film className="h-4 w-4" />
                         回放
                     </Button>
-                    <Badge variant={game.status === EGameStatus.PLAYING ? 'success' : 'secondary'} className="text-[10px] sm:text-xs">
+                    <span className={cn(
+                        "status-badge-glass rounded-full px-2.5 py-0.5 text-[10px] sm:text-xs",
+                        game.status === EGameStatus.PLAYING ? 'border-emerald-400/40 text-emerald-300' :
+                        game.status === EGameStatus.WAITING ? 'border-white/30 text-white/70' :
+                        'border-purple-400/40 text-purple-200'
+                    )}>
                         {game.status === EGameStatus.WAITING
                             ? '等待中'
                             : game.status === EGameStatus.DEALING
@@ -311,21 +317,27 @@ export default function GameTable() {
                                             : game.status === EGameStatus.PLAYING
                                                 ? '进行中'
                                                 : '已结束'}
-                    </Badge>
+                    </span>
                     {game.currentLevel && (
-                        <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs hidden sm:inline-flex">
-                            {game.currentLevel}级
-                        </Badge>
+                        <span className="status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs border-amber-400/40 text-amber-300 hidden sm:inline-flex gap-1">
+                            <span className="opacity-60">级</span>
+                            <span className="font-bold">{game.currentLevel}</span>
+                        </span>
                     )}
                     {game.trumpSuit && (
-                        <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs hidden sm:inline-flex">
-                            主:{game.trumpSuit === 'hearts' ? '♥' : game.trumpSuit === 'diamonds' ? '♦' : game.trumpSuit === 'clubs' ? '♣' : game.trumpSuit === 'spades' ? '♠' : game.trumpSuit}
-                        </Badge>
+                        <span className="status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs border-pink-400/40 text-pink-300 hidden sm:inline-flex gap-1">
+                            <span>主</span>
+                            <span className="font-bold">
+                                {game.trumpSuit === 'hearts' ? '♥' : game.trumpSuit === 'diamonds' ? '♦' : game.trumpSuit === 'clubs' ? '♣' : game.trumpSuit === 'spades' ? '♠' : game.trumpSuit}
+                            </span>
+                        </span>
                     )}
                     {game.hostCalledCard && (
-                        <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs bg-purple-950/50 border-purple-500 text-purple-200 hidden md:inline-flex">
-                            🎯盟友:{SUIT_SYMBOLS[game.hostCalledCard.suit]}{game.hostCalledCard.value}(第{game.hostCalledCard.position}张)
-                        </Badge>
+                        <span className="status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs border-primary/50 text-primary-foreground hidden md:inline-flex gap-1">
+                            <span>友</span>
+                            <span className="font-bold">{SUIT_SYMBOLS[game.hostCalledCard.suit]}{game.hostCalledCard.value}</span>
+                            <span className="opacity-60">(第{game.hostCalledCard.position}张)</span>
+                        </span>
                     )}
                 </div>
             </div>
@@ -333,7 +345,13 @@ export default function GameTable() {
             {/* 游戏桌面区域 - 响应式 */}
             <div className="relative flex-1 flex items-center justify-center p-2 sm:p-4">
                 {/* 桌面容器 - 移动端小尺寸，桌面端自适应 */}
-                <div className="relative w-[95vw] h-[45vh] sm:w-[90vw] sm:h-[55vh] md:w-[85vw] md:h-[60vh] lg:w-[75vw] lg:h-[65vh] xl:w-[70vw] xl:h-[65vh] max-w-5xl max-h-[70vh] rounded-2xl sm:rounded-3xl border-2 sm:border-4 border-amber-900/30 bg-emerald-900/60 shadow-inner">
+                <div className="relative w-[95vw] h-[45vh] sm:w-[90vw] sm:h-[55vh] md:w-[85vw] md:h-[60vh] lg:w-[75vw] lg:h-[65vh] xl:w-[70vw] xl:h-[65vh] max-w-5xl max-h-[70vh] rounded-2xl sm:rounded-3xl border-2 sm:border-[3px] border-white/20 game-table-surface shadow-inner">
+
+                    {/* 浮动光斑 */}
+                    <div className="table-orb w-32 h-24" style={{top:'8%',left:'12%','--duration':'14s','--delay':'0s','--dx1':'15px','--dy1':'-12px','--dx2':'-8px','--dy2':'10px',background:'radial-gradient(ellipse, rgba(168,85,247,0.35) 0%, transparent 70%)',filter:'blur(20px)'} as React.CSSProperties} />
+                    <div className="table-orb w-24 h-20" style={{top:'65%',right:'10%','--duration':'18s','--delay':'-5s','--dx1':'-20px','--dy1':'15px','--dx2':'10px','--dy2':'-8px',background:'radial-gradient(ellipse, rgba(236,72,153,0.3) 0%, transparent 70%)',filter:'blur(16px)'} as React.CSSProperties} />
+                    <div className="table-orb w-20 h-16" style={{bottom:'20%',left:'5%','--duration':'22s','--delay':'-10s','--dx1':'10px','--dy1':'-20px','--dx2':'-15px','--dy2':'12px',background:'radial-gradient(ellipse, rgba(59,130,246,0.3) 0%, transparent 70%)',filter:'blur(18px)'} as React.CSSProperties} />
+
                     {otherPlayers.map((player, i) => (
                         <PlayerSeat
                             key={player.id}
@@ -345,24 +363,24 @@ export default function GameTable() {
                     ))}
 
                     {game.currentTrick.length > 0 && (
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-1 sm:gap-2 z-10">
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 trick-zone rounded-2xl p-3 sm:p-4 flex gap-2 sm:gap-3">
                             {game.currentTrick.map((played, i) => (
-                                <div key={i} className="flex flex-col items-center gap-0.5 sm:gap-1">
-                  <span className="text-[10px] sm:text-xs text-slate-400">
-                    {game.players.find((p) => p.id === played.playerId)?.username}
-                  </span>
-                                    <div className="flex gap-0.5">
+                                <div key={i} className="flex flex-col items-center gap-1 sm:gap-2">
+                                    <span className="text-[10px] sm:text-xs text-white/60 font-medium">
+                                        {game.players.find((p) => p.id === played.playerId)?.username}
+                                    </span>
+                                    <div className="flex gap-1">
                                         {played.cards.map((card, j) => (
                                             <div
                                                 key={j}
-                                                className="flex h-8 w-6 sm:h-10 sm:w-8 flex-col items-center justify-center rounded border border-slate-400 bg-white text-[10px] sm:text-xs font-bold"
+                                                className="flex h-8 w-6 sm:h-11 sm:w-8 flex-col items-center justify-center rounded-xl glass-card border border-white/25 bg-white/15 text-[10px] sm:text-xs font-bold shadow-md"
                                             >
-                        <span className={cn(getSuitClass(card.suit), 'text-[10px] sm:text-sm')}>
-                          {SUIT_SYMBOLS[card.suit] || ''}
-                        </span>
+                                                <span className={cn(getSuitClass(card.suit), 'text-[10px] sm:text-sm')}>
+                                                    {SUIT_SYMBOLS[card.suit] || ''}
+                                                </span>
                                                 <span className={getSuitClass(card.suit)}>
-                          {card.value}
-                        </span>
+                                                    {card.value}
+                                                </span>
                                             </div>
                                         ))}
                                     </div>
@@ -373,12 +391,53 @@ export default function GameTable() {
                 </div>
             </div>
 
+            {/* ====== 全屏对话框（渲染在游戏桌之上）====== */}
+            {/* 叫庄对话框 */}
+            {showCallDialog && (
+                <CallDealerDialog
+                    onSubmit={handleCallDealer}
+                    isPending={callDealerMutation.isPending}
+                    currentLevel={game.trumpRank || '2'}
+                />
+            )}
+
+            {/* 扣牌对话框 */}
+            {showDiscardDialog && (
+                <DiscardDialog
+                    bottomCards={game.bottomCards}
+                    onSubmit={handleDiscard}
+                    isPending={discardMutation.isPending}
+                />
+            )}
+
+            {/* 叫朋友对话框 */}
+            {showCallFriendDialog && (
+                callFriendMinimized ? (
+                    // 最小化状态：显示浮动恢复按钮
+                    <button
+                        onClick={() => setCallFriendMinimized(false)}
+                        className="fixed bottom-24 right-4 z-50 rounded-full w-14 h-14 flex flex-col items-center justify-center gap-0.5 glass-card border border-purple-400/50 shadow-[0_4px_20px_rgba(139,92,246,0.4)] text-white/80 hover:text-white hover:bg-purple-500/20 transition-all"
+                    >
+                        <span className="text-base">👥</span>
+                        <span className="text-[9px] font-bold">叫朋友</span>
+                    </button>
+                ) : (
+                    <CallFriendDialog
+                        onSubmit={handleCallFriend}
+                        onMinimize={() => setCallFriendMinimized(true)}
+                        isPending={callFriendMutation.isPending}
+                        currentLevel={game.currentLevel}
+                        playerHand={game.myHand}
+                    />
+                )
+            )}
+
             {/* 手牌区域 - 手机端可折叠 */}
-            <div className="border-t border-border/40 bg-background/95">
+            <div className="border-t border-white/10 hand-area-glass">
                 {/* 折叠按钮 */}
                 <button
                     onClick={() => setShowHand(!showHand)}
-                    className="w-full py-2 flex items-center justify-center gap-2 bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+                    className="w-full py-2 flex items-center justify-center gap-2 hand-toggle-bar text-white/80 hover:text-white transition-colors"
                 >
                     {showHand ? (
                         <EyeOff className="w-4 h-4" />
@@ -405,44 +464,12 @@ export default function GameTable() {
                     </div>
                 )}
 
-                {/* 叫庄对话框 */}
-                {showCallDialog && (
-                    <div className="mb-4">
-                        <CallDealerDialog
-                            onSubmit={handleCallDealer}
-                            isPending={callDealerMutation.isPending}
-                            currentLevel={game.trumpRank || '2'}
-                        />
-                    </div>
-                )}
-
-                {/* 扣牌对话框 */}
-                {showDiscardDialog && (
-                    <div className="mb-4">
-                        <DiscardDialog
-                            bottomCards={game.bottomCards}
-                            onSubmit={handleDiscard}
-                            isPending={discardMutation.isPending}
-                        />
-                    </div>
-                )}
-
-                {/* 叫朋友对话框 */}
-                {showCallFriendDialog && (
-                    <CallFriendDialog
-                        onSubmit={handleCallFriend}
-                        isPending={callFriendMutation.isPending}
-                        currentLevel={game.currentLevel}
-                        playerHand={game.myHand}
-                    />
-                )}
-
                 {/* 游戏控制按钮 */}
-                <div className="mt-2 sm:mt-3 rounded-lg border-2 border-amber-500/30 bg-gradient-to-r from-amber-950/20 via-amber-900/20 to-amber-950/20 p-2 sm:p-4 shadow-lg">
+                <div className="mt-2 sm:mt-3 rounded-xl border border-white/15 game-control-panel p-2 sm:p-4">
                     {game.status === EGameStatus.WAITING && (
                         <div className="flex flex-col items-center gap-2 sm:gap-3">
                             <div className="text-center">
-                                <p className="text-xs sm:text-sm text-amber-200/80">
+                                <p className="text-xs sm:text-sm text-white/70">
                                     等待玩家准备... ({readyStatusData?.readyStates?.filter(s => s.isReady).length || 0}/5 已准备)
                                 </p>
                                 <div className="mt-1 sm:mt-2 flex flex-wrap justify-center gap-1 sm:gap-2">
@@ -452,10 +479,10 @@ export default function GameTable() {
                                         return (
                                             <div
                                                 key={player.id}
-                                                className={`rounded-full px-2 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm ${
+                                                className={`rounded-full px-2 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm backdrop-blur-sm transition-all ${
                                                     isReady
-                                                        ? 'bg-green-600/40 text-green-100'
-                                                        : 'bg-amber-900/40 text-amber-100'
+                                                        ? 'bg-emerald-500/25 border border-emerald-400/40 text-emerald-200'
+                                                        : 'bg-white/10 border border-white/20 text-white/70'
                                                 }`}
                                             >
                                                 {player.username}
@@ -476,7 +503,7 @@ export default function GameTable() {
                                     <Button
                                         variant="outline"
                                         size="default"
-                                        className="gap-1 sm:gap-2 text-sm sm:text-base border-amber-500/50 text-amber-200 hover:bg-amber-900/30 w-full sm:w-auto"
+                                        className="gap-1 sm:gap-2 text-sm sm:text-base border-white/25 text-white/80 hover:bg-white/10 hover:text-white w-full sm:w-auto backdrop-blur-sm"
                                         onClick={() => cancelReadyMutation.mutate()}
                                         disabled={cancelReadyMutation.isPending}
                                     >
@@ -507,12 +534,12 @@ export default function GameTable() {
                             })()}
 
                             {(game.players?.length || 0) < 5 && (
-                                <p className="text-[10px] sm:text-xs text-amber-200/60 text-center px-1">
+                                <p className="text-[10px] sm:text-xs text-white/40 text-center px-1">
                                     需要5人加入并全部准备后开始游戏
                                 </p>
                             )}
                             {(game.players?.length || 0) >= 5 && (
-                                <p className="text-[10px] sm:text-xs text-amber-200/60 text-center px-1">
+                                <p className="text-[10px] sm:text-xs text-white/40 text-center px-1">
                                     所有玩家准备后游戏将自动开始
                                 </p>
                             )}
@@ -523,20 +550,20 @@ export default function GameTable() {
                     {game.status === EGameStatus.DEALING && (
                         <div className="flex flex-col items-center gap-3">
                             <div className="text-center">
-                                <p className="text-lg font-bold text-amber-100">发牌中...</p>
-                                <p className="text-sm text-amber-200/80">
+                                <p className="text-lg font-bold text-white/90">发牌中...</p>
+                                <p className="text-sm text-white/60">
                                     已发 {game.dealtCardCount || 0}/{game.totalCardsPerPlayer || 31} 张/人
                                 </p>
-                                <div className="mt-2 w-64 h-2 bg-amber-900/50 rounded-full overflow-hidden">
+                                <div className="deal-progress-bar mt-2 w-64">
                                     <div
-                                        className="h-full bg-amber-500 transition-all duration-200"
+                                        className="deal-progress-fill"
                                         style={{ width: `${((game.dealtCardCount || 0) / 31) * 100}%` }}
                                     />
                                 </div>
                             </div>
 
                             {/* 发牌过程中可以抢庄 */}
-                            <p className="text-xs text-amber-300/70">
+                            <p className="text-xs text-white/40">
                                 可以在发牌过程中选择级牌进行抢庄
                             </p>
 
@@ -609,8 +636,8 @@ export default function GameTable() {
                             </Button>
                         )}
                         {game.status === EGameStatus.DISCARDING && game.dealerSeat !== game.myPosition && (
-                            <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-2 sm:p-4 text-center">
-                                <p className="text-xs sm:text-sm text-amber-200">等待庄家扣牌...</p>
+                            <div className="waiting-glass rounded-xl p-2 sm:p-4 text-center">
+                                <p className="text-xs sm:text-sm text-white/70">等待庄家扣牌...</p>
                             </div>
                         )}
                         {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
@@ -625,8 +652,8 @@ export default function GameTable() {
                                         叫朋友
                                     </Button>
                                 ) : (
-                                    <div className="rounded-lg border-2 border-amber-500/30 bg-amber-950/20 p-2 sm:p-4 text-center">
-                                        <p className="text-xs sm:text-sm text-amber-200">请等待庄家选择花色</p>
+                                    <div className="waiting-glass rounded-xl p-2 sm:p-4 text-center">
+                                        <p className="text-xs sm:text-sm text-white/70">请等待庄家选择花色</p>
                                     </div>
                                 )}
                             </>
@@ -646,7 +673,7 @@ export default function GameTable() {
                                 <Button
                                     variant="outline"
                                     size="default"
-                                    className="gap-1 sm:gap-2 text-sm sm:text-base w-full sm:w-auto"
+                                    className="gap-1 sm:gap-2 text-sm sm:text-base w-full sm:w-auto glass border-white/20 text-white/80 hover:bg-white/10 hover:text-white backdrop-blur-sm"
                                     onClick={handlePass}
                                     disabled={passTurn.isPending}
                                 >
@@ -661,7 +688,7 @@ export default function GameTable() {
                             </>
                         )}
                         {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (
-                            <div className="rounded-lg border-2 border-blue-500/30 bg-blue-950/20 p-2 sm:p-4 text-center">
+                            <div className="waiting-glass rounded-xl p-2 sm:p-4 text-center border-blue-400/20">
                                 <p className="text-xs sm:text-sm text-blue-200">等待其他玩家出牌...</p>
                             </div>
                         )}

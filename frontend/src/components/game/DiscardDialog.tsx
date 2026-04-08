@@ -21,17 +21,17 @@ export default function DiscardDialog({ bottomCards, onSubmit, isPending }: Disc
   };
 
   return (
-    <div className="mb-4 w-full rounded-xl border-2 border-amber-500/50 bg-gradient-to-b from-amber-950/95 via-amber-900/95 to-amber-950/95 p-4 shadow-2xl">
-      <h2 className="mb-3 text-center text-xl font-bold text-amber-400">
+    <div className="mb-4 w-full rounded-xl border border-purple-400/30 bg-purple-950/50 p-5 backdrop-blur-md shadow-[0_4px_32px_rgba(139,92,246,0.25)]">
+      <h2 className="mb-3 text-center text-xl font-bold text-white/90">
         扣底牌
       </h2>
 
-      <div className="mb-3 rounded-lg border border-amber-700/30 bg-amber-950/30 p-3">
-        <p className="text-center text-sm text-amber-200">
-          你获得了庄家位置！请从手牌中选择<span className="font-bold text-amber-400"> 7 张牌</span>扣除作为底牌。
+      <div className="mb-3 rounded-lg glass-card border border-white/15 p-3">
+        <p className="text-center text-sm text-white/70">
+          你获得了庄家位置！请从手牌中选择<span className="font-bold text-purple-300"> 7 张牌</span>扣除作为底牌。
         </p>
-        <p className="mt-2 text-center text-sm text-amber-300/70">
-          已选择: <span className="font-bold text-amber-400">{selectedCardIndices.size}</span> / 7 张
+        <p className="mt-2 text-center text-sm text-white/50">
+          已选择: <span className="font-bold text-purple-300">{selectedCardIndices.size}</span> / 7 张
         </p>
       </div>
 
@@ -39,19 +39,19 @@ export default function DiscardDialog({ bottomCards, onSubmit, isPending }: Disc
         <div className="mb-3">
           <button
             onClick={() => setShowBottomCards(!showBottomCards)}
-            className="w-full rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-1.5 text-sm text-amber-300 transition-colors hover:bg-amber-900/40"
+            className="w-full rounded-lg glass-card border border-white/20 px-3 py-1.5 text-sm text-white/70 transition-all hover:bg-white/15 hover:text-white"
           >
             {showBottomCards ? '隐藏' : '查看'}底牌 ({bottomCards.length}张)
           </button>
 
           {showBottomCards && (
-            <div className="mt-2 flex flex-wrap gap-1.5 rounded-lg border border-amber-700/30 bg-amber-950/20 p-2">
+            <div className="mt-2 flex flex-wrap gap-1.5 rounded-lg glass-card border border-white/15 p-2">
               {bottomCards.map((card, i) => (
                 <div
                   key={i}
-                  className="flex h-10 w-8 items-center justify-center rounded border border-amber-600 bg-amber-50 text-xs font-bold shadow-md"
+                  className="flex h-10 w-8 items-center justify-center rounded-xl glass-card border border-white/25 bg-white/15 text-xs font-bold shadow-md"
                 >
-                  <span className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-600' : 'text-slate-900'}>
+                  <span className={card.suit === 'hearts' || card.suit === 'diamonds' ? 'text-red-500' : 'text-slate-800'}>
                     {card.value}
                   </span>
                 </div>
@@ -61,7 +61,7 @@ export default function DiscardDialog({ bottomCards, onSubmit, isPending }: Disc
         </div>
       )}
 
-      <div className="mb-3 rounded-lg border border-amber-700/30 bg-amber-950/20 p-2 text-center text-xs text-amber-300/80">
+      <div className="mb-3 rounded-lg glass-card border border-white/15 p-2.5 text-center text-xs text-white/50">
         💡 提示：点击下方手牌选择要扣除的牌。扣除的牌将在游戏结束时计分。
       </div>
 

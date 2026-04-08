@@ -5,6 +5,7 @@ import PlayingCard from './PlayingCard';
 
 interface CallFriendDialogProps {
   onSubmit: (suit: ECardSuit, value: string, position: number) => void;
+  onMinimize: () => void;
   isPending: boolean;
   currentLevel: string;
   playerHand: ICard[];
@@ -25,7 +26,7 @@ const VALUE_LABELS: Record<string, string> = {
   'big': '大王',
 };
 
-export default function CallFriendDialog({ onSubmit, isPending, currentLevel, playerHand }: CallFriendDialogProps) {
+export default function CallFriendDialog({ onSubmit, onMinimize, isPending, currentLevel, playerHand }: CallFriendDialogProps) {
   const [selectedSuit, setSelectedSuit] = useState<ECardSuit>(ECardSuit.SPADES);
   const [selectedValue, setSelectedValue] = useState<string>('A');
   const [selectedPosition, setSelectedPosition] = useState<number>(1);
@@ -68,28 +69,38 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-2xl p-5 max-w-sm w-full border-2 border-amber-400/30 my-4 max-h-[85vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="glass-card rounded-2xl shadow-[0_8px_40px_rgba(139,92,246,0.35)] p-5 max-w-sm w-full border border-white/20 my-4 max-h-[85vh] overflow-y-auto backdrop-blur-xl">
         {/* 标题 */}
-        <div className="text-center mb-3">
-          <h2 className="text-xl font-bold text-amber-600">
-            叫朋友
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">选择一张牌作为盟友标识</p>
+        <div className="flex items-center justify-between mb-3">
+          <button
+            onClick={onMinimize}
+            className="text-white/40 hover:text-white/70 text-xs transition-colors"
+          >
+            隐藏
+          </button>
+          <div className="flex-1 text-center">
+            <h2 className="text-xl font-bold text-white/90">
+              叫朋友
+            </h2>
+            <p className="text-xs text-white/40 mt-1">选择一张牌作为盟友标识</p>
+          </div>
+          {/* 占位，保持标题居中 */}
+          <div className="w-8" />
         </div>
 
         {/* 查看手牌按钮 */}
         <button
           onClick={() => setShowHand(!showHand)}
-          className="w-full mb-3 py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+          className="w-full mb-3 py-2 px-4 glass-card border border-white/20 text-white/80 hover:text-white hover:bg-white/15 rounded-lg text-sm font-medium transition-all backdrop-blur-md"
         >
           {showHand ? '隐藏手牌' : '查看手牌'}
         </button>
 
         {/* 手牌展示区域 */}
         {showHand && (
-          <div className="mb-3 p-2 bg-green-50 rounded-lg border border-green-200">
-            <p className="text-xs text-green-700 mb-2 font-medium">您的手牌（已理好）</p>
+          <div className="mb-3 p-2 glass-card rounded-lg border border-white/15">
+            <p className="text-xs text-white/60 mb-2 font-medium">您的手牌（已理好）</p>
             <div className="flex flex-wrap justify-center gap-1">
               {sortedHand.map((card, index) => (
                 <PlayingCard
@@ -105,21 +116,21 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
         <div className="space-y-3">
           {/* 选择花色 */}
           {!isJokerSelected && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <label className="block text-xs font-semibold mb-2 text-gray-700">选择花色</label>
+            <div className="glass-card rounded-lg p-3 border border-white/15">
+              <label className="block text-xs font-semibold mb-2 text-white/60">选择花色</label>
               <div className="grid grid-cols-4 gap-2">
                 {[ECardSuit.SPADES, ECardSuit.HEARTS, ECardSuit.DIAMONDS, ECardSuit.CLUBS].map((suit) => (
                   <button
                     key={suit}
                     onClick={() => setSelectedSuit(suit)}
-                    className={`p-2 rounded-lg border-2 text-lg font-bold transition-all ${
+                    className={`p-2 rounded-xl border-2 text-lg font-bold transition-all backdrop-blur-sm ${
                       selectedSuit === suit
-                        ? 'border-amber-500 bg-amber-50'
-                        : 'border-gray-300 bg-white hover:border-amber-300'
+                        ? 'border-purple-400 bg-purple-500/30 text-white shadow-lg shadow-purple-500/30'
+                        : 'border-white/20 bg-white/10 text-white/80 hover:border-white/40 hover:bg-white/15'
                     }`}
                     disabled={isPending}
                   >
-                    <span className={suit === ECardSuit.HEARTS || suit === ECardSuit.DIAMONDS ? 'text-red-600' : 'text-gray-800'}>
+                    <span className={suit === ECardSuit.HEARTS || suit === ECardSuit.DIAMONDS ? 'text-red-400' : 'text-white'}>
                       {SUIT_LABELS[suit]}
                     </span>
                   </button>
@@ -129,17 +140,17 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
           )}
 
           {/* 选择牌值 */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <label className="block text-xs font-semibold mb-2 text-gray-700">选择牌值</label>
+          <div className="glass-card rounded-lg p-3 border border-white/15">
+            <label className="block text-xs font-semibold mb-2 text-white/60">选择牌值</label>
             <div className="grid grid-cols-5 gap-1 max-h-24 overflow-y-auto">
               {availableValues.map((value) => (
                 <button
                   key={value}
                   onClick={() => setSelectedValue(value)}
-                  className={`p-1.5 rounded border text-xs font-bold transition-all ${
+                  className={`p-1.5 rounded-lg border text-xs font-bold transition-all backdrop-blur-sm ${
                     selectedValue === value
-                      ? 'border-amber-500 bg-amber-50 text-amber-800'
-                      : 'border-gray-300 bg-white text-gray-700'
+                      ? 'border-purple-400 bg-purple-500/30 text-white/90'
+                      : 'border-white/15 bg-white/10 text-white/60 hover:bg-white/15 hover:text-white/80'
                   }`}
                   disabled={isPending}
                 >
@@ -150,17 +161,17 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
           </div>
 
           {/* 选择位置 */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <label className="block text-xs font-semibold mb-2 text-gray-700">第几张</label>
+          <div className="glass-card rounded-lg p-3 border border-white/15">
+            <label className="block text-xs font-semibold mb-2 text-white/60">第几张</label>
             <div className="grid grid-cols-3 gap-2">
               {[1, 2, 3].map((pos) => (
                 <button
                   key={pos}
                   onClick={() => setSelectedPosition(pos)}
-                  className={`p-2 rounded-lg border-2 text-sm font-bold transition-all ${
+                  className={`p-2 rounded-xl border-2 text-sm font-bold transition-all backdrop-blur-sm ${
                     selectedPosition === pos
-                      ? 'border-amber-500 bg-amber-50 text-amber-800'
-                      : 'border-gray-300 bg-white text-gray-700'
+                      ? 'border-purple-400 bg-purple-500/30 text-white shadow-lg shadow-purple-500/20'
+                      : 'border-white/20 bg-white/10 text-white/70 hover:border-white/40 hover:bg-white/15'
                   }`}
                   disabled={isPending}
                 >
@@ -171,7 +182,7 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
           </div>
 
           {/* 当前选择 */}
-          <div className="bg-amber-500 p-2 rounded-lg text-center">
+          <div className="bg-gradient-to-r from-purple-600/60 to-fuchsia-600/60 p-2 rounded-xl text-center border border-purple-400/30 backdrop-blur-sm shadow-lg shadow-purple-500/20">
             <p className="text-white text-sm font-medium">
               {isJokerSelected ? VALUE_LABELS[selectedValue] : `${SUIT_LABELS[selectedSuit]}${selectedValue}`} (第{selectedPosition}张)
             </p>
@@ -179,9 +190,10 @@ export default function CallFriendDialog({ onSubmit, isPending, currentLevel, pl
 
           {/* 提交按钮 */}
           <Button
+            variant="game"
             onClick={handleSubmit}
             disabled={isPending}
-            className="w-full py-2 text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white"
+            className="w-full py-2 text-sm font-bold"
           >
             {isPending ? '提交中...' : '确认'}
           </Button>

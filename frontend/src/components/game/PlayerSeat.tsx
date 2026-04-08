@@ -1,6 +1,5 @@
 import { cn } from '@/lib/utils';
 import { User } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import type { IPlayer } from '@/types';
 
 interface IPlayerSeatProps {
@@ -61,57 +60,84 @@ export default function PlayerSeat({
 
   return (
     <div
-      className="absolute flex flex-col items-center gap-0.5 sm:gap-1"
+      className="absolute flex flex-col items-center gap-1 sm:gap-1.5"
       style={positionStyle}
     >
+      {/* 玩家信息卡 */}
+      {player && (
+        <div className="glass-card rounded-xl px-2 py-1 sm:px-2.5 sm:py-1.5 backdrop-blur-md border border-white/20 bg-white/10 shadow-lg">
+          <span className="text-[9px] sm:text-xs font-medium text-white/90 max-w-[60px] sm:max-w-[80px] truncate block">
+            {player.username}
+          </span>
+        </div>
+      )}
+
       <div className="relative">
+        {/* 头像光晕（轮到时） */}
+        {isCurrentTurn && (
+          <div className="absolute inset-0 rounded-full animate-pulse"
+            style={{
+              background: 'radial-gradient(circle, rgba(168,85,247,0.5) 0%, transparent 70%)',
+              filter: 'blur(8px)',
+              animation: 'seat-glow 2s ease-in-out infinite',
+            }} />
+        )}
         <div
           className={cn(
-            'flex items-center justify-center rounded-full border-2 transition-all',
+            'relative flex items-center justify-center rounded-full border-2 transition-all backdrop-blur-md',
             // 移动端更小头像
-            'h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12',
+            'h-9 w-9 sm:h-11 sm:w-11 md:h-13 md:w-13',
             player
               ? isCurrentTurn
-                ? 'border-amber-400 bg-amber-400/10 shadow-lg shadow-amber-400/20'
-                : 'border-slate-600 bg-slate-800'
-              : 'border-dashed border-slate-700 bg-slate-900/50',
+                ? 'border-purple-400 bg-purple-500/25 shadow-lg shadow-purple-500/30'
+                : 'border-white/30 bg-white/10'
+              : 'border-dashed border-white/20 bg-white/5',
           )}
         >
           {player ? (
             player.isAI ? (
               <span className="text-sm sm:text-base md:text-lg">🤖</span>
             ) : (
-              <User className="h-3 w-3 sm:h-4 sm:w-4 md:h-5 md:w-5 text-slate-400" />
+              <User className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white/70" />
             )
           ) : (
-            <span className="text-[8px] sm:text-xs text-slate-600">空</span>
+            <span className="text-[8px] sm:text-xs text-white/30">空</span>
           )}
         </div>
         {player && !player.isAI && (
-          <Badge
-            variant="default"
-            className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 text-[8px] sm:text-[10px] px-0.5 sm:px-1 py-0 min-w-[14px] sm:min-w-[18px] h-[14px] sm:h-[18px] flex items-center justify-center bg-amber-500 text-white border-0"
+          <span
+            className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 text-[8px] sm:text-[10px] px-0.5 sm:px-1 py-0 min-w-[14px] sm:min-w-[18px] h-[14px] sm:h-[18px] flex items-center justify-center glass-card border border-white/30 text-white/90 shadow-md backdrop-blur-sm rounded-full"
           >
             {player.level || '2'}
-          </Badge>
+          </span>
         )}
       </div>
+
       {player && (
-        <div className="flex flex-col items-center gap-0">
-          <span className="text-[9px] sm:text-xs font-medium text-slate-300 max-w-[60px] sm:max-w-[80px] truncate">
-            {player.username}
-          </span>
+        <div className="flex flex-col items-center gap-0.5">
           <div className="flex gap-0.5 flex-wrap justify-center">
-            {isDealer && <Badge variant="warning" className="text-[8px] sm:text-[10px] px-1 py-0">庄</Badge>}
-            {player.isAI && <Badge variant="secondary" className="text-[8px] sm:text-[10px] px-1 py-0">AI</Badge>}
-            {(friendRevealed || player.isFriend) && <Badge variant="secondary" className="text-[8px] sm:text-[10px] px-1 py-0 bg-purple-600/30 text-purple-300 border-purple-500/30">友</Badge>}
-            <Badge variant="outline" className="text-[8px] sm:text-[10px] px-1 py-0 text-slate-400 border-slate-700">
+            {isDealer && (
+              <span className="status-badge-glass rounded-full px-1.5 py-0 text-[8px] sm:text-[10px] border-amber-400/50 text-amber-300 backdrop-blur-sm">
+                庄
+              </span>
+            )}
+            {player.isAI && (
+              <span className="status-badge-glass rounded-full px-1.5 py-0 text-[8px] sm:text-[10px] border-blue-400/40 text-blue-300 backdrop-blur-sm">
+                AI
+              </span>
+            )}
+            {(friendRevealed || player.isFriend) && (
+              <span className="status-badge-glass rounded-full px-1.5 py-0 text-[8px] sm:text-[10px] border-primary/50 text-primary-foreground backdrop-blur-sm">
+                友
+              </span>
+            )}
+            <span className="status-badge-glass rounded-full px-1.5 py-0 text-[8px] sm:text-[10px] border-white/20 text-white/50 backdrop-blur-sm">
               {cardCount ?? player.cardCount ?? 0}张
-            </Badge>
+            </span>
             {score > 0 && (
-              <Badge variant="secondary" className="text-[8px] sm:text-[10px] px-1 py-0 bg-green-600/20 text-green-400 border-green-600/30">
+              <span className="status-badge-glass rounded-full px-1.5 py-0 text-[8px] sm:text-[10px] border-emerald-400/40 text-emerald-300 backdrop-blur-sm">
                 {score}分
-              </Badge>
+              </span>
             )}
           </div>
         </div>

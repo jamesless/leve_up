@@ -14,7 +14,7 @@ const buttonVariants = cva(
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
-        game: 'relative bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 text-white hover:from-amber-400 hover:via-amber-500 hover:to-amber-600 shadow-[0_0_20px_rgba(251,191,36,0.4)] hover:shadow-[0_0_25px_rgba(251,191,36,0.5)] active:scale-95 border-2 border-amber-400/50',
+        game: 'relative bg-gradient-to-br from-purple-600 via-violet-600 to-fuchsia-600 text-white hover:from-purple-500 hover:via-violet-500 hover:to-fuchsia-500 shadow-[0_0_20px_rgba(168,85,247,0.45)] hover:shadow-[0_0_30px_rgba(236,72,153,0.5)] active:scale-95 border-2 border-purple-400/50 backdrop-blur-sm',
       },
       size: {
         default: 'h-10 px-4 py-2',

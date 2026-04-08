@@ -1,25 +1,35 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import * as path from 'path';
+import react from '@vitejs/plugin-react-swc';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 修复: plugin-react-swc 在 Windows 上的 @react-refresh 端点 bug
+const reactRefreshFix = {
+  name: 'react-refresh-fix',
+  resolveId(id) {
+    if (id === '/@react-refresh' || id.startsWith('/@react-refresh:')) return id;
+  },
+  load(id) {
+    if (id === '/@react-refresh' || id.startsWith('/@react-refresh:')) {
+      return `export * from 'react-refresh/runtime';`;
+    }
+  },
+};
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), reactRefreshFix],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
   server: {
-      // 允许的访问主机列表
       allowedHosts: [
-          // 添加 ngrok 生成的域名
           'curdy-ductless-josie.ngrok-free.dev',
-          // 可选：添加通配符，适配 ngrok 每次生成的不同域名（更方便）
           '.ngrok-free.dev'
       ],
-      // 可选：如果 ngrok 提示端口被占用，可指定 Vite 端口
-      // port: 3000,
-      // 可选：允许跨域（配合 ngrok 更稳定）
       cors: true,
     port: 5175,
     proxy: {

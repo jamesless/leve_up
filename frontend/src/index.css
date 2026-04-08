@@ -421,6 +421,209 @@
     z-index: 2;
   }
 
+  /* ============================
+     游戏桌面 — 梦幻玻璃桌面
+     ============================ */
+  .game-table-surface {
+    position: relative;
+    background:
+      /* 白色亮斑气泡 */
+      radial-gradient(ellipse 120px 90px at 15% 20%, rgba(255, 255, 255, 0.14) 0%, transparent 70%),
+      radial-gradient(ellipse 100px 70px at 85% 25%, rgba(255, 255, 255, 0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 90px 80px at 60% 80%, rgba(255, 255, 255, 0.10) 0%, transparent 70%),
+      radial-gradient(ellipse 80px 60px at 25% 75%, rgba(255, 255, 255, 0.08) 0%, transparent 70%),
+      radial-gradient(ellipse 70px 50px at 50% 10%, rgba(255, 255, 255, 0.09) 0%, transparent 70%),
+      /* 紫色调 (primary) */
+      radial-gradient(ellipse 160px 120px at 40% 50%, rgba(139, 92, 246, 0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 100px 80px at 70% 35%, rgba(168, 85, 247, 0.09) 0%, transparent 70%),
+      radial-gradient(ellipse 80px 100px at 20% 40%, rgba(147, 51, 234, 0.08) 0%, transparent 70%),
+      /* 粉色调 (accent) */
+      radial-gradient(ellipse 110px 90px at 80% 70%, rgba(236, 72, 153, 0.08) 0%, transparent 70%),
+      radial-gradient(ellipse 70px 60px at 30% 60%, rgba(244, 114, 182, 0.07) 0%, transparent 70%),
+      /* 蓝色调 (secondary) */
+      radial-gradient(ellipse 90px 110px at 10% 50%, rgba(59, 130, 246, 0.07) 0%, transparent 70%),
+      radial-gradient(ellipse 70px 90px at 90% 55%, rgba(96, 165, 250, 0.06) 0%, transparent 70%);
+    background-color: rgba(30, 20, 60, 0.55);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
+
+  /* 桌面外层光晕 */
+  .game-table-surface::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(168, 85, 247, 0.4) 0%,
+      rgba(139, 92, 246, 0.2) 25%,
+      rgba(236, 72, 153, 0.2) 50%,
+      rgba(139, 92, 246, 0.2) 75%,
+      rgba(168, 85, 247, 0.4) 100%
+    );
+    z-index: -1;
+    filter: blur(6px);
+    opacity: 0.6;
+    animation: table-glow 8s ease-in-out infinite;
+  }
+
+  @keyframes table-glow {
+    0%, 100% { opacity: 0.45; filter: blur(6px); }
+    50% { opacity: 0.75; filter: blur(10px); }
+  }
+
+  @keyframes seat-glow {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+
+  /* 玩家座位当前回合动画 */
+  @keyframes seat-ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.6), 0 0 12px rgba(168, 85, 247, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(168, 85, 247, 0), 0 0 20px rgba(236, 72, 153, 0.4); }
+  }
+
+  /* 桌面上层内嵌高光 */
+  .game-table-surface::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg,
+        rgba(255, 255, 255, 0.12) 0%,
+        rgba(255, 255, 255, 0.04) 40%,
+        transparent 60%
+      );
+    pointer-events: none;
+  }
+
+  /* 桌面浮动光斑动画 */
+  .table-orb {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: orb-drift var(--duration, 12s) ease-in-out infinite;
+    animation-delay: var(--delay, 0s);
+  }
+
+  @keyframes orb-drift {
+    0%   { transform: translate(0, 0) scale(1); opacity: 0.5; }
+    33%  { transform: translate(var(--dx1, 20px), var(--dy1, -15px)) scale(1.1); opacity: 0.7; }
+    66%  { transform: translate(var(--dx2, -10px), var(--dy2, 20px)) scale(0.9); opacity: 0.4; }
+    100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+  }
+
+  /* ============================
+     当前回合桌面 — 发光玻璃出牌区
+     ============================ */
+  .trick-zone {
+    position: relative;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 4px 24px rgba(139, 92, 246, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    animation: trick-zone-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes trick-zone-pulse {
+    0%, 100% { box-shadow: 0 4px 24px rgba(139, 92, 246, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+    50% { box-shadow: 0 4px 32px rgba(236, 72, 153, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+  }
+
+  /* ============================
+     游戏状态栏玻璃徽章
+     ============================ */
+  .status-badge-glass {
+    background: rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 12px rgba(139, 92, 246, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+  }
+
+  /* ============================
+     游戏控制面板 — 玻璃效果
+     ============================ */
+  .game-control-panel {
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.10) 0%, transparent 60%),
+      rgba(20, 10, 40, 0.65);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow:
+      0 -8px 32px rgba(139, 92, 246, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+
+  /* ============================
+     手牌区域玻璃
+     ============================ */
+  .hand-area-glass {
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(139, 92, 246, 0.08) 0%, transparent 60%),
+      rgba(15, 8, 30, 0.8);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .hand-toggle-bar {
+    background: rgba(139, 92, 246, 0.15);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.3s ease;
+  }
+
+  .hand-toggle-bar:hover {
+    background: rgba(139, 92, 246, 0.25);
+  }
+
+  /* ============================
+     等待/状态提示玻璃卡
+     ============================ */
+  .waiting-glass {
+    background: rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow:
+      0 4px 16px rgba(59, 130, 246, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* ============================
+     发牌进度条 — 梦幻渐变
+     ============================ */
+  .deal-progress-bar {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .deal-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+      rgba(139, 92, 246, 0.8),
+      rgba(236, 72, 153, 0.8)
+    );
+    border-radius: 9999px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 8px rgba(236, 72, 153, 0.5);
+  }
+
   /* 房间卡片 Aero 玻璃效果 */
   .aero-card::before {
     content: '';

@@ -18,26 +18,26 @@ export default function CallDealerDialog({ onSubmit, isPending, currentLevel = '
   const canSubmit = selectedCardIndices.size > 0;
 
   return (
-    <div className="rounded-lg border-2 border-amber-500/50 bg-amber-950/30 p-6 backdrop-blur-sm">
+    <div className="rounded-xl border border-purple-400/30 bg-purple-950/40 p-5 backdrop-blur-md shadow-[0_4px_24px_rgba(139,92,246,0.2)]">
       <div className="mb-4">
-        <h3 className="text-lg font-bold text-amber-100">选择级牌叫庄</h3>
-        <p className="mt-1 text-sm text-amber-200/70">
+        <h3 className="text-lg font-bold text-white/90">选择级牌叫庄</h3>
+        <p className="mt-1 text-sm text-white/50">
           请从手牌中选择 {currentLevel} 级牌进行叫庄，花色将自动确定
         </p>
       </div>
 
       {/* 选牌提示 */}
-      <div className="mb-4 rounded-md bg-amber-900/20 p-3">
-        <p className="text-sm text-amber-200">
+      <div className="mb-4 rounded-lg glass-card p-3 border border-white/15">
+        <p className="text-sm text-white/80">
           <span className="font-semibold">已选择 {selectedCardIndices.size} 张牌</span>
         </p>
         {selectedCardIndices.size === 0 && (
-          <p className="mt-1 text-xs text-amber-300/50">
+          <p className="mt-1 text-xs text-white/40">
             请点击手牌中的 {currentLevel} 进行选择
           </p>
         )}
         {selectedCardIndices.size > 0 && (
-          <p className="mt-1 text-xs text-amber-300/70">
+          <p className="mt-1 text-xs text-white/50">
             选择更多同花色级牌可以增加叫庄优先级
           </p>
         )}
@@ -50,14 +50,14 @@ export default function CallDealerDialog({ onSubmit, isPending, currentLevel = '
           size="sm"
           onClick={clearSelection}
           disabled={isPending}
-          className="text-amber-200 hover:text-amber-100"
+          className="text-white/60 hover:text-white/90 hover:bg-white/10"
         >
           清空选择
         </Button>
         <Button
+          variant="game"
           onClick={handleSubmit}
           disabled={!canSubmit || isPending}
-          className="bg-amber-600 text-white hover:bg-amber-700"
         >
           {isPending ? '提交中...' : '确认叫庄'}
         </Button>
