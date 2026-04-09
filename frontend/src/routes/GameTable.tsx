@@ -1,9 +1,8 @@
 import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, SkipForward, Film, Eye, EyeOff, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import PlayerHand from '@/components/game/PlayerHand';
-import PlayerSeat from '@/components/game/PlayerSeat';
 import CallDealerDialog from '@/components/game/CallDealerDialog';
 import DiscardDialog from '@/components/game/DiscardDialog';
 import CallFriendDialog from '@/components/game/CallFriendDialog';
@@ -27,8 +26,6 @@ import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
 import { EGameStatus, ECardSuit } from '@/types';
 import React, { useEffect, useRef, useState} from 'react';
-
-const SEAT_POSITIONS = ['top', 'top-right', 'bottom-right', 'bottom-left', 'top-left'] as const;
 
 // 花色符号映射
 const SUIT_SYMBOLS: Record<string, string> = {
@@ -234,8 +231,6 @@ export default function GameTable() {
         );
     }
 
-    const otherPlayers = game.players.filter(player => player.position !== game.myPosition);
-
     const handlePlay = () => {
         if (selectedCardIndices.size === 0) return;
         // 不再限制出牌数量，用户可以选择任意数量的牌
@@ -342,52 +337,176 @@ export default function GameTable() {
                 </div>
             </div>
 
-            {/* 游戏桌面区域 - 响应式 */}
-            <div className="relative flex-1 flex items-center justify-center p-2 sm:p-4">
-                {/* 桌面容器 - 移动端小尺寸，桌面端自适应 */}
-                <div className="relative w-[95vw] h-[45vh] sm:w-[90vw] sm:h-[55vh] md:w-[85vw] md:h-[60vh] lg:w-[75vw] lg:h-[65vh] xl:w-[70vw] xl:h-[65vh] max-w-5xl max-h-[70vh] rounded-2xl sm:rounded-3xl border-2 sm:border-[3px] border-white/20 game-table-surface shadow-inner">
-
-                    {/* 浮动光斑 */}
-                    <div className="table-orb w-32 h-24" style={{top:'8%',left:'12%','--duration':'14s','--delay':'0s','--dx1':'15px','--dy1':'-12px','--dx2':'-8px','--dy2':'10px',background:'radial-gradient(ellipse, rgba(168,85,247,0.35) 0%, transparent 70%)',filter:'blur(20px)'} as React.CSSProperties} />
-                    <div className="table-orb w-24 h-20" style={{top:'65%',right:'10%','--duration':'18s','--delay':'-5s','--dx1':'-20px','--dy1':'15px','--dx2':'10px','--dy2':'-8px',background:'radial-gradient(ellipse, rgba(236,72,153,0.3) 0%, transparent 70%)',filter:'blur(16px)'} as React.CSSProperties} />
-                    <div className="table-orb w-20 h-16" style={{bottom:'20%',left:'5%','--duration':'22s','--delay':'-10s','--dx1':'10px','--dy1':'-20px','--dx2':'-15px','--dy2':'12px',background:'radial-gradient(ellipse, rgba(59,130,246,0.3) 0%, transparent 70%)',filter:'blur(18px)'} as React.CSSProperties} />
-
-                    {otherPlayers.map((player, i) => (
-                        <PlayerSeat
-                            key={player.id}
-                            player={player}
-                            position={SEAT_POSITIONS[i] ?? 'top'}
-                            isCurrentTurn={game.currentPlayer === player.position}
-                            isDealer={game.dealerTeam.includes(player.id)}
-                        />
-                    ))}
-
-                    {game.currentTrick.length > 0 && (
-                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 trick-zone rounded-2xl p-3 sm:p-4 flex gap-2 sm:gap-3">
-                            {game.currentTrick.map((played, i) => (
-                                <div key={i} className="flex flex-col items-center gap-1 sm:gap-2">
-                                    <span className="text-[10px] sm:text-xs text-white/60 font-medium">
-                                        {game.players.find((p) => p.id === played.playerId)?.username}
-                                    </span>
-                                    <div className="flex gap-1">
-                                        {played.cards.map((card, j) => (
-                                            <div
-                                                key={j}
-                                                className="flex h-8 w-6 sm:h-11 sm:w-8 flex-col items-center justify-center rounded-xl glass-card border border-white/25 bg-white/15 text-[10px] sm:text-xs font-bold shadow-md"
-                                            >
-                                                <span className={cn(getSuitClass(card.suit), 'text-[10px] sm:text-sm')}>
-                                                    {SUIT_SYMBOLS[card.suit] || ''}
-                                                </span>
-                                                <span className={getSuitClass(card.suit)}>
-                                                    {card.value}
-                                                </span>
-                                            </div>
-                                        ))}
+            {/* 主体区域 */}
+            <div className="flex flex-1 overflow-hidden flex-col sm:flex-row">
+                {/* ====== PC端左侧玩家列表（手机端隐藏）====== */}
+                <div className="hidden sm:flex border-r border-white/10 bg-black/20 backdrop-blur-sm flex-col w-24 md:w-28">
+                    <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
+                        {game.players.map((player) => {
+                            const isMe = player.id === Number(user?.id);
+                            const isCurrentTurn = game.currentPlayer === player.position;
+                            const isDealer = game.dealerTeam.includes(player.id);
+                            const score = game.scores?.[player.id] || 0;
+                            return (
+                                <div key={player.id} className={cn('rounded-lg p-1.5 transition-all border', isCurrentTurn ? 'bg-purple-500/20 border-purple-400/50' : 'bg-white/5 border-white/10')}>
+                                    <div className={cn('relative flex items-center justify-center rounded-full border mx-auto mb-1 h-8 w-8', isCurrentTurn ? 'border-purple-400 bg-purple-500/25' : 'border-white/30 bg-white/10')}>
+                                        {player.isAI ? <span className="text-xs">🤖</span> : <User className="h-4 w-4 text-white/70" />}
+                                        {isCurrentTurn && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-purple-400/50" />}
+                                    </div>
+                                    <div className="text-center mb-0.5">
+                                        <span className={cn('text-xs font-medium block truncate', isMe ? 'text-amber-300' : 'text-white/90')}>{player.username}</span>
+                                        {isMe && <span className="text-[8px] text-amber-400/70">(我)</span>}
+                                    </div>
+                                    <div className="flex flex-wrap justify-center gap-0.5 mb-1">
+                                        {isDealer && <span className="text-[7px] px-1 py-0 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300">庄</span>}
+                                        {player.isAI && <span className="text-[7px] px-1 py-0 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-300">AI</span>}
+                                        {player.isFriend && <span className="text-[7px] px-1 py-0 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300">友</span>}
+                                    </div>
+                                    <div className="text-center">
+                                        <span className="text-xs text-white/60">{player.cardCount || 0}张</span>
+                                        {score > 0 && <div className="text-[9px] text-emerald-400">+{score}</div>}
                                     </div>
                                 </div>
-                            ))}
+                            );
+                        })}
+                    </div>
+                    {game.status === EGameStatus.PLAYING && (
+                        <div className="p-2 border-t border-white/10">
+                            {(() => {
+                                const currentPlayer = game.players.find(p => p.position === game.currentPlayer);
+                                const isMyTurn = game.currentPlayer === game.myPosition;
+                                return (
+                                    <div className={cn('text-center text-[10px] rounded p-1.5', isMyTurn ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/60')}>
+                                        {isMyTurn ? '▶你的回合' : `${currentPlayer?.username?.substring(0,4)||'?'}出牌`}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     )}
+                </div>
+
+                {/* ====== 游戏桌面（PC右侧/手机全宽）====== */}
+                <div className="flex-1 relative flex flex-col overflow-hidden">
+                    {/* 手机端：玩家信息条 */}
+                    <div className="sm:hidden flex items-center justify-between px-2 py-1 border-b border-white/10 bg-black/30">
+                        <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
+                            {game.players.map((player) => {
+                                const isMe = player.id === Number(user?.id);
+                                const isCurrentTurn = game.currentPlayer === player.position;
+                                const isDealer = game.dealerTeam.includes(player.id);
+                                return (
+                                    <div key={player.id} className={cn('flex-shrink-0 flex items-center gap-1 rounded-full px-2 py-0.5 border text-[9px]', isCurrentTurn ? 'bg-purple-500/30 border-purple-400/60' : 'bg-white/5 border-white/10')}>
+                                        {isCurrentTurn && <span className="text-purple-300">▶</span>}
+                                        <span className={isMe ? 'text-amber-300 font-medium' : 'text-white/80'}>{player.username.substring(0,3)}</span>
+                                        {isDealer && <span className="text-amber-400">庄</span>}
+                                        {player.isAI && <span className="text-blue-400">AI</span>}
+                                        <span className="text-white/40">{player.cardCount||0}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {game.status === EGameStatus.PLAYING && (
+                            <div className="flex-shrink-0 text-[10px] px-2">
+                                {game.currentPlayer === game.myPosition ? (
+                                    <span className="text-emerald-400">你的回合</span>
+                                ) : (
+                                    <span className="text-white/50">等待...</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* PC端：出牌区域 */}
+                    {game.status === EGameStatus.PLAYING && game.currentTrick.length > 0 && (
+                        <div className="hidden sm:flex items-center gap-3 p-2 border-b border-white/10 bg-black/20 overflow-x-auto">
+                            <span className="text-[10px] text-white/40 whitespace-nowrap">本轮:</span>
+                            {game.currentTrick.map((played, i) => {
+                                const player = game.players.find(p => p.id === played.playerId);
+                                return (
+                                    <div key={i} className="flex items-center gap-1 flex-shrink-0">
+                                        <span className="text-[9px] text-white/50">{player?.username?.substring(0,4)||'?'}</span>
+                                        <div className="flex gap-0.5">
+                                            {played.cards.map((card, j) => (
+                                                <div key={j} className="flex h-6 w-4 flex-col items-center justify-center rounded glass-card border border-white/20 bg-white/10 font-bold">
+                                                    <span className={cn(getSuitClass(card.suit), 'text-[10px] leading-none')}>{SUIT_SYMBOLS[card.suit]||''}{card.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* 游戏桌面 */}
+                    <div className="flex-1 relative flex items-center justify-center p-1 sm:p-4 overflow-hidden">
+                        <div className="relative w-full h-full max-w-3xl max-h-full rounded-xl sm:rounded-3xl border-2 sm:border-[3px] border-white/20 game-table-surface shadow-inner flex items-center justify-center overflow-hidden">
+                            {/* 浮动光斑 */}
+                            <div className="table-orb w-32 h-24 absolute hidden sm:block" style={{top:'8%',left:'12%','--duration':'14s','--delay':'0s','--dx1':'15px','--dy1':'-12px','--dx2':'-8px','--dy2':'10px',background:'radial-gradient(ellipse, rgba(168,85,247,0.35) 0%, transparent 70%)',filter:'blur(20px)'} as React.CSSProperties} />
+
+                            {/* 手机端出牌 */}
+                            {game.status === EGameStatus.PLAYING && game.currentTrick.length > 0 && (
+                                <div className="sm:hidden z-10 w-full px-2">
+                                    <div className="flex items-center gap-2 overflow-x-auto justify-center pb-1">
+                                        {game.currentTrick.map((played, i) => {
+                                            const player = game.players.find(p => p.id === played.playerId);
+                                            const isMe = player?.id === Number(user?.id);
+                                            return (
+                                                <div key={i} className="flex-shrink-0 flex flex-col items-center gap-1">
+                                                    <span className={cn('text-[9px] font-medium px-2 py-0.5 rounded-full', isMe ? 'text-amber-300 bg-amber-500/20' : 'text-white/60 bg-white/10')}>
+                                                        {player?.username?.substring(0,3) || '?'}
+                                                    </span>
+                                                    <div className="flex gap-0.5">
+                                                        {played.cards.map((card, j) => (
+                                                            <div key={j} className="flex h-10 w-6 flex-col items-center justify-center rounded-lg glass-card border border-white/25 bg-white/15 font-bold">
+                                                                <span className={cn(getSuitClass(card.suit), 'text-sm')}>{SUIT_SYMBOLS[card.suit]||''}</span>
+                                                                <span className={cn(getSuitClass(card.suit), 'text-[10px]')}>{card.value}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PC端出牌 */}
+                            {game.status === EGameStatus.PLAYING && game.currentTrick.length > 0 ? (
+                                <div className="hidden sm:flex z-10 trick-zone rounded-2xl p-4 gap-6">
+                                    {game.currentTrick.map((played, i) => (
+                                        <div key={i} className="flex flex-col items-center gap-2">
+                                            <span className="text-sm text-white/60 font-medium">{game.players.find((p) => p.id === played.playerId)?.username}</span>
+                                            <div className="flex gap-1">
+                                                {played.cards.map((card, j) => (
+                                                    <div key={j} className="flex h-14 w-10 flex-col items-center justify-center rounded-xl glass-card border border-white/25 bg-white/15 font-bold shadow-md">
+                                                        <span className={cn(getSuitClass(card.suit), 'text-xl')}>{SUIT_SYMBOLS[card.suit]||''}</span>
+                                                        <span className={cn(getSuitClass(card.suit), 'text-base')}>{card.value}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : null}
+
+                            {/* 无出牌时 */}
+                            {game.status === EGameStatus.PLAYING && game.currentTrick.length === 0 && (
+                                <div className="z-10 text-center">
+                                    <div className="text-white/30 text-xs sm:text-sm">等待出牌...</div>
+                                    {game.currentPlayer === game.myPosition && (
+                                        <div className="mt-1 text-emerald-400/60 text-[10px] sm:text-xs">请选择手牌</div>
+                                    )}
+                                </div>
+                            )}
+
+                            {game.status !== EGameStatus.PLAYING && (
+                                <div className="z-10 text-center">
+                                    <div className="text-white/30 text-xs sm:text-sm">{game.status === EGameStatus.WAITING ? '等待开始...' : ''}</div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -432,12 +551,12 @@ export default function GameTable() {
                 )
             )}
 
-            {/* 手牌区域 - 手机端可折叠 */}
+            {/* 手牌区域 - 手机端固定显示，PC端可折叠 */}
             <div className="border-t border-white/10 hand-area-glass">
-                {/* 折叠按钮 */}
+                {/* PC端折叠按钮 */}
                 <button
                     onClick={() => setShowHand(!showHand)}
-                    className="w-full py-2 flex items-center justify-center gap-2 hand-toggle-bar text-white/80 hover:text-white transition-colors"
+                    className="hidden sm:flex w-full py-2 items-center justify-center gap-2 hand-toggle-bar text-white/80 hover:text-white transition-colors"
                 >
                     {showHand ? (
                         <EyeOff className="w-4 h-4" />
@@ -448,17 +567,17 @@ export default function GameTable() {
                     <span className="text-xs bg-slate-600 px-2 py-0.5 rounded">{game.myHand?.length || 0} 张</span>
                 </button>
 
-                {/* 手牌区域 - 当有对话框或点击展开时显示 */}
-                {(showHand || showCallDialog || showDiscardDialog || showCallFriendDialog) && (
-                    <div className="p-4 pb-2 overflow-x-auto">
-                        <div className="min-w-max">
+                {/* 手牌区域 - 手机端始终显示，PC端按需显示 */}
+                {(showHand || showCallDialog || showDiscardDialog || showCallFriendDialog || true) && (
+                    <div className="sm:p-3 pt-4 overflow-hidden">
+                        <div className="sm:min-w-max sm:flex sm:justify-center">
                             <PlayerHand
                                 cards={game.myHand}
                                 trumpRank={game.trumpRank}
                                 trumpSuit={game.trumpSuit ?? undefined}
                                 gameStatus={game.status}
                                 friendCard={game.hostCalledCard}
-                                size="sm"
+                                size={game.myHand?.length > 20 ? "xs" : "sm"}
                             />
                         </div>
                     </div>
@@ -670,21 +789,6 @@ export default function GameTable() {
                                     {playCards.isPending ? <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" /> : <Play className="h-4 w-4 sm:h-5 sm:w-5" />}
                                     出牌 ({selectedCardIndices.size})
                                 </Button>
-                                <Button
-                                    variant="outline"
-                                    size="default"
-                                    className="gap-1 sm:gap-2 text-sm sm:text-base w-full sm:w-auto glass border-white/20 text-white/80 hover:bg-white/10 hover:text-white backdrop-blur-sm"
-                                    onClick={handlePass}
-                                    disabled={passTurn.isPending}
-                                >
-                                    {passTurn.isPending ? <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" /> : <SkipForward className="h-4 w-4 sm:h-5 sm:w-5" />}
-                                    不出
-                                </Button>
-                                {passTurn.isError && (
-                                    <p className="mt-2 text-center text-xs sm:text-sm text-red-400">
-                                        操作失败，请重试
-                                    </p>
-                                )}
                             </>
                         )}
                         {game.status === EGameStatus.PLAYING && game.currentPlayer !== game.myPosition && (

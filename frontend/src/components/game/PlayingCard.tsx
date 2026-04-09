@@ -6,7 +6,7 @@ interface IPlayingCardProps {
   card: ICard;
   selected?: boolean;
   onClick?: () => void;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   faceDown?: boolean;
   className?: string;
   isTrumpRank?: boolean; // 是否是级牌（叫庄阶段高亮）
@@ -16,6 +16,7 @@ interface IPlayingCardProps {
 }
 
 const SIZE_CLASSES = {
+  xs: 'w-8 h-11 text-[10px]',
   sm: 'w-10 h-14 text-xs',
   md: 'w-14 h-20 text-sm',
   lg: 'w-20 h-28 text-base',
@@ -79,7 +80,7 @@ export default function PlayingCard({
       )}
       {/* 盟友牌标签 */}
       {isFriend && (
-        <div className="absolute -right-1 -top-1 rounded-full backdrop-blur-md bg-purple-600/90 border border-purple-300/40 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-lg shadow-purple-500/30">
+        <div className="absolute -right-1 -top-1 rounded-md backdrop-blur-md bg-purple-600/90 border border-purple-300/50 px-1 py-0.5 text-[9px] font-bold text-white shadow-lg shadow-purple-500/40 z-10">
           友
         </div>
       )}
@@ -89,10 +90,10 @@ export default function PlayingCard({
           red ? 'text-red-600' : isJoker ? (isBigJoker ? 'text-red-600' : 'text-slate-800') : 'text-slate-900',
         )}
       >
-        <span className={size === 'sm' ? 'text-[11px]' : 'text-sm'}>
+        <span className={size === 'xs' ? 'text-[9px]' : size === 'sm' ? 'text-[11px]' : 'text-sm'}>
           {getCardDisplayValue(card)}
         </span>
-        <span className={size === 'sm' ? 'text-sm' : 'text-base'}>
+        <span className={size === 'xs' ? 'text-xs' : size === 'sm' ? 'text-sm' : 'text-base'}>
           {getSuitSymbol(card.suit)}
         </span>
       </div>
@@ -102,7 +103,7 @@ export default function PlayingCard({
           red ? 'text-red-600' : isJoker ? (isBigJoker ? 'text-red-600' : 'text-slate-800') : 'text-slate-900',
         )}
       >
-        <span className={cn(size === 'sm' ? 'text-xl' : size === 'md' ? 'text-3xl' : 'text-4xl', 'opacity-15')}>
+        <span className={cn(size === 'xs' ? 'text-lg' : size === 'sm' ? 'text-xl' : size === 'md' ? 'text-3xl' : 'text-4xl', 'opacity-15')}>
           {getSuitSymbol(card.suit)}
         </span>
       </div>

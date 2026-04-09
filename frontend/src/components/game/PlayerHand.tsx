@@ -17,7 +17,7 @@ interface IPlayerHandProps {
     position: number;
     count: number;
   }; // 盟友牌信息
-  size?: 'sm' | 'md' | 'lg'; // 牌的大小
+  size?: 'xs' | 'sm' | 'md' | 'lg'; // 牌的大小
 }
 
 export default function PlayerHand({
@@ -158,8 +158,9 @@ export default function PlayerHand({
 
   // 判断是否显示主牌标签
   const shouldShowTrumpLabel = (card: ICard) => {
-    // 只在叫庄结束后显示标签
+    // 叫庄结束后且有主牌信息才显示
     if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
+    if (!trumpSuit && !trumpRank) return false;
     return isTrumpCard(card);
   };
 
@@ -185,50 +186,35 @@ export default function PlayerHand({
           <TabsList className="w-full justify-start overflow-x-auto">
             {groupCardsBySuit.trump.length > 0 && (
               <TabsTrigger value="trump" className="relative">
-                主牌 <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.trump.length})</span>
-                {sortedCards.some((c) => isTrumpCard(c) && selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
-                )}
+                主 <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.trump.length})</span>
               </TabsTrigger>
             )}
             {groupCardsBySuit.spades.length > 0 && (
               <TabsTrigger value="spades" className="relative">
                 ♠ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.spades.length})</span>
-                {groupCardsBySuit.spades.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
-                )}
               </TabsTrigger>
             )}
             {groupCardsBySuit.hearts.length > 0 && (
               <TabsTrigger value="hearts" className="relative">
                 ♥ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.hearts.length})</span>
-                {groupCardsBySuit.hearts.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
-                )}
               </TabsTrigger>
             )}
             {groupCardsBySuit.clubs.length > 0 && (
               <TabsTrigger value="clubs" className="relative">
                 ♣ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.clubs.length})</span>
-                {groupCardsBySuit.clubs.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
-                )}
               </TabsTrigger>
             )}
             {groupCardsBySuit.diamonds.length > 0 && (
               <TabsTrigger value="diamonds" className="relative">
                 ♦ <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.diamonds.length})</span>
-                {groupCardsBySuit.diamonds.some((c) => selectedCardIndices.has(sortedToOriginalIndex[sortedCards.indexOf(c)])) && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
-                )}
               </TabsTrigger>
             )}
           </TabsList>
-          {Object.entries(groupCardsBySuit).map(([suit, cards]) => (
-            cards.length > 0 && (
+          {Object.entries(groupCardsBySuit).map(([suit, suitCards]) => (
+            suitCards.length > 0 && (
               <TabsContent key={suit} value={suit} className="mt-2">
                 <div className="flex flex-wrap items-end justify-start gap-1">
-                  {cards.map((card) => {
+                  {suitCards.map((card) => {
                     const i = sortedCards.indexOf(card);
                     const disabled = isCardDisabled(i);
                     const isFriend = isFriendCard(card);
@@ -238,7 +224,7 @@ export default function PlayerHand({
                           card={card}
                           selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
                           onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
-                          size="md"
+                          size="sm"
                           isTrumpRank={shouldHighlightTrumpRank(card)}
                           isTrump={shouldHighlightTrump(card)}
                           showTrumpLabel={shouldShowTrumpLabel(card)}
