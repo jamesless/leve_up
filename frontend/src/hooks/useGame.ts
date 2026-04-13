@@ -213,7 +213,15 @@ export function useCallFriend(gameId: string) {
   return useMutation({
     mutationFn: (params: { suit: string; value: string; position: number }) =>
       gameService.callFriend(gameId, params.suit, params.value, params.position),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // 立即更新缓存中的游戏表格数据（包含 game 和 table）
+      if (data?.game || data?.table) {
+        queryClient.setQueryData(['gameTable', gameId], {
+          ...data,
+          success: true,
+        });
+      }
+      // 同时触发一次 invalidate 确保数据一致性
       queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
     },
   });
@@ -276,5 +284,17 @@ export function usePlayerPlayedCards(gameId: string, enabled = false) {
     queryFn: () => gameService.getPlayerPlayedCards(gameId),
     enabled: Boolean(gameId) && enabled,
     staleTime: 0, // 每次打开对话框都重新获取
+  });
+}
+
+// 开始新的一局
+export function useNextRound(gameId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gameService.nextRound(gameId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['gameTable', gameId] });
+    },
   });
 }

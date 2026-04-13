@@ -6,8 +6,17 @@ import (
 	"log"
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
 )
+
+// Global game locks to prevent concurrent modifications to the same game
+var gameLocks sync.Map
+
+func getGameLock(gameID string) *sync.Mutex {
+	lock, _ := gameLocks.LoadOrStore(gameID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
 
 // GameState represents the current state of a game
 type GameState struct {
@@ -42,6 +51,7 @@ type PlayerHand struct {
 	HasCalled  bool   `json:"hasCalled"` // Whether they've called a card
 	Score      int    `json:"score"`     // Current round score
 	Collected  []Card `json:"collected"` // Cards collected (scoring cards)
+	Level      string `json:"level"`     // Player's current level
 }
 
 // GameTable represents the active game table
@@ -60,6 +70,7 @@ type GameTable struct {
 	CurrentTrick       []PlayedCard        `json:"currentTrick"`                 // Cards in current trick
 	LastCompletedTrick []PlayedCard        `json:"lastCompletedTrick,omitempty"` // Cards from the previous completed trick
 	TrickLeader        int                 `json:"trickLeader"`                  // Who led the current trick
+	TrickPassCount     int                 `json:"-"`                            // Number of passes this trick
 	TricksWon          [][]Card            `json:"tricksWon"`                    // All tricks won by defender team
 	PlayerHands        map[int]*PlayerHand `json:"playerHands"`                  // Seat -> PlayerHand
 	LastPlay           *PlayResult         `json:"lastPlay"`                     // Last play result
@@ -89,6 +100,10 @@ type GameTable struct {
 	// 甩牌失败高亮显示
 	ThrowBlocker     int    `json:"throwBlocker,omitempty"`     // 让甩牌失败的玩家座位号（用于高亮显示）
 	ThrowBlockerCard string `json:"throwBlockerCard,omitempty"` // 让甩牌失败的牌描述
+
+	// 本局结算信息（游戏结束后用于前端显示）
+	TotalPoints  int          `json:"totalPoints,omitempty"`  // 闲家（抓分方）本局总得分
+	RoundResults []GameResult `json:"roundResults,omitempty"` // 本局每个玩家的结算结果
 }
 
 // PreviousGameResult 记录上一局的结果，用于确定下一局的起始发牌人
@@ -151,8 +166,8 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 		return nil, fmt.Errorf("only host can start the game")
 	}
 
-	if len(game.PlayerIDs) != 5 {
-		return nil, fmt.Errorf("need exactly 5 players to start")
+	if len(game.PlayerIDs) != 5 && len(game.PlayerIDs) < 3 {
+		return nil, fmt.Errorf("need at least 3 players to start")
 	}
 
 	if game.Status != "waiting" {
@@ -162,21 +177,30 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 	// 创建并洗好牌（3副牌，共162张）
 	allCards := createShuffledDeck()
 
-	// 分离底牌（最后7张）和待发的牌（前155张）
-	bottomCards := allCards[155:162]
-	dealingCards := allCards[0:155]
+	// 根据玩家数量计算发牌数量（每人31张，7张底牌）
+	numPlayers := len(game.PlayerIDs)
+	if numPlayers < 3 {
+		numPlayers = 3
+	}
+	cardsToDeal := numPlayers * 31
+	if cardsToDeal > 155 {
+		cardsToDeal = 155 // 最多发155张（5人）
+	}
+	bottomCards := allCards[cardsToDeal : cardsToDeal+7]
+	dealingCards := allCards[0:cardsToDeal]
 
 	// Determine starting dealer based on previous game result
 	// 规则2.2：起始发牌者根据上一局结果确定
 	startingDealer := 1 // 默认值
+	maxSeats := numPlayers
 	if game.PreviousDealerSeat == 0 {
-		// 首局：随机确定起始发牌者
-		startingDealer = rand.Intn(5) + 1
+		// 首局：随机确定起始发牌者（只在前numPlayers个座位中选择）
+		startingDealer = rand.Intn(maxSeats) + 1
 	} else {
 		// 有上一局结果，根据规则确定
 		prevResult, err := getPreviousGameResult(gameID)
 		if err != nil {
-			startingDealer = rand.Intn(5) + 1
+			startingDealer = rand.Intn(maxSeats) + 1
 		} else {
 			startingDealer = determineStartingDealer(prevResult, game.PreviousDealerSeat)
 		}
@@ -410,22 +434,22 @@ func GetTableGame(gameID string) (*GameTable, error) {
 // CallFriendCard sets the card the host calls to find their friend
 // position: 第几张被打出的牌成为盟友（1=第1张，2=第2张，3=第3张）
 // 如果叫的牌在庄家手中或底牌中达不到position张数，则触发1打4独打模式
-func CallFriendCard(gameID, userID, suit, value string, position int) error {
+func CallFriendCard(gameID, userID, suit, value string, position int) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if table.HostID != userID {
-		return fmt.Errorf("only host can call friend")
+		return nil, fmt.Errorf("only host can call friend")
 	}
 
 	if table.Status != "playing" && table.Status != "calling_friend" {
-		return fmt.Errorf("游戏不在进行中或叫朋友阶段")
+		return nil, fmt.Errorf("游戏不在进行中或叫朋友阶段")
 	}
 
 	if position < 1 || position > 3 {
-		return fmt.Errorf("position must be between 1 and 3")
+		return nil, fmt.Errorf("position must be between 1 and 3")
 	}
 
 	// 叫牌限制：不可以叫本轮场上已经亮过的牌（叫庄、反庄时亮出的牌）
@@ -436,7 +460,7 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 		// 例如：用红桃2叫庄，则记录为 {Rank: "2", Suit: "hearts"}
 		// 表示亮出了红桃2，不能再叫红桃2，但可以叫方片2
 		if record.Rank == value && record.Suit == suit {
-			return fmt.Errorf("不可以叫本轮场上已经亮过的牌: %s%s", suit, value)
+			return nil, fmt.Errorf("不可以叫本轮场上已经亮过的牌: %s%s", suit, value)
 		}
 	}
 
@@ -451,7 +475,7 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 	totalCount := 0
 	dealerHand, ok := table.PlayerHands[table.DealerSeat]
 	if !ok {
-		return fmt.Errorf("dealer hand not found")
+		return nil, fmt.Errorf("dealer hand not found")
 	}
 
 	// 统计庄家手牌中该牌的数量
@@ -498,10 +522,11 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 			},
 		})
 
-		// 独打模式下庄家仍然需要扣底牌（38张扣7张剩31张），先进入discarding状态
+		// 独打模式下叫朋友完成后直接进入出牌阶段
+		// （因为已经先扣底再叫朋友，所以这里直接进入playing）
 		if table.Status == "calling_friend" {
-			table.Status = "discarding"
-			table.CurrentPlayer = table.DealerSeat // 庄家扣底
+			table.Status = "playing"
+			table.CurrentPlayer = table.DealerSeat
 			table.CallPhase = "finished"
 			table.UpdatedAt = time.Now()
 		}
@@ -509,7 +534,7 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 		// Save the updated table state
 		activeGames[gameID] = table
 
-		return nil
+		return table, nil
 	}
 
 	// 正常2打3模式
@@ -535,10 +560,11 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 		},
 	})
 
-	// 如果之前是calling_friend状态，进入discarding状态（扣底环节）
+	// 如果之前是calling_friend状态，叫朋友完成后直接进入出牌阶段
+	// （因为已经先扣底再叫朋友，所以这里直接进入playing）
 	if table.Status == "calling_friend" {
-		table.Status = "discarding"
-		table.CurrentPlayer = table.DealerSeat // 庄家扣底
+		table.Status = "playing"
+		table.CurrentPlayer = table.DealerSeat
 		table.CallPhase = "finished"
 		table.UpdatedAt = time.Now()
 	}
@@ -546,7 +572,7 @@ func CallFriendCard(gameID, userID, suit, value string, position int) error {
 	// Save the updated table state
 	activeGames[gameID] = table
 
-	return nil
+	return table, nil
 }
 
 // PlayCardGame plays a card from a player's hand
@@ -1445,6 +1471,139 @@ func UpdateGameStatus(gameID, status string) error {
 	return err
 }
 
+// UpdateGameCurrentLevel updates the current level of a game in the database
+func UpdateGameCurrentLevel(gameID, level string) error {
+	query := `UPDATE games SET current_level = $1 WHERE id = $2`
+	_, err := db.Exec(query, level, gameID)
+	return err
+}
+
+// NextRound resets the table for a new round after a game has ended
+// It preserves player levels (already updated by RecordGameResult) and
+// resets all game state for the new round
+func NextRound(gameID string) (*GameTable, error) {
+	lock := getGameLock(gameID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	game, err := GetGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	table, ok := activeGames[gameID]
+	if !ok {
+		return nil, fmt.Errorf("game table not found")
+	}
+
+	if table.Status != "finished" {
+		return nil, fmt.Errorf("game is not finished, cannot start next round")
+	}
+
+	// Get the new current level from the winning team (already updated in DB by RecordGameResult)
+	// Find the max level among all players
+	newLevel := "2"
+	maxLevelIndex := -1
+	levels := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
+	for _, playerID := range game.PlayerIDs {
+		user, err := GetUserByID(playerID)
+		if err != nil {
+			continue
+		}
+		for i, lvl := range levels {
+			if lvl == user.Level && i > maxLevelIndex {
+				maxLevelIndex = i
+				newLevel = user.Level
+			}
+		}
+	}
+
+	// Update game's current level in database
+	if err := UpdateGameCurrentLevel(gameID, newLevel); err != nil {
+		return nil, fmt.Errorf("failed to update game level: %v", err)
+	}
+
+	// Create new shuffled deck
+	allCards := createShuffledDeck()
+
+	// Determine number of players
+	numPlayers := len(game.PlayerIDs)
+	if numPlayers < 3 {
+		numPlayers = 3
+	}
+	cardsToDeal := numPlayers * 31
+	if cardsToDeal > 155 {
+		cardsToDeal = 155
+	}
+	bottomCards := allCards[cardsToDeal : cardsToDeal+7]
+	dealingCards := allCards[0:cardsToDeal]
+
+	// Determine starting dealer based on previous round result
+	startingDealer := determineStartingDealer(table.PreviousResult, table.DealerSeat)
+
+	// Reset table for new round
+	table.Status = "dealing"
+	table.CurrentLevel = newLevel
+	table.TrumpSuit = ""
+	table.TrumpRank = newLevel
+	table.HostCalledCard = nil
+	table.FriendRevealed = false
+	table.FriendSeat = 0
+	table.IsSoloMode = false
+	table.BottomCards = bottomCards
+	table.CurrentPlayer = startingDealer
+	table.TrickLeader = startingDealer
+	table.CurrentTrick = make([]PlayedCard, 0)
+	table.LastCompletedTrick = make([]PlayedCard, 0)
+	table.TricksWon = make([][]Card, 0)
+	table.CurrentCaller = startingDealer
+	table.CallPhase = "dealing"
+	table.CallCountdown = 0
+	table.CallRecords = make([]CallRecord, 0)
+	table.PassedSeats = make([]int, 0)
+	table.FlippedBottomCards = make([]Card, 0)
+	table.StartingDealerSeat = startingDealer
+	table.DealingPhase = "dealing"
+	table.DealtCardCount = 0
+	table.DealingCards = dealingCards
+	table.TotalCardsPerPlayer = 31
+	table.ThrowBlocker = 0
+	table.ThrowBlockerCard = ""
+	table.TotalPoints = 0
+	table.RoundResults = nil
+	table.LastPlay = nil
+
+	// Reset each player's hand
+	for _, hand := range table.PlayerHands {
+		hand.Cards = make([]Card, 0)
+		hand.IsFriend = false
+		hand.HasCalled = false
+		hand.Score = 0
+		hand.Collected = make([]Card, 0)
+		// Update level from database
+		if u, err := GetUserByID(hand.UserID); err == nil {
+			hand.Level = u.Level
+		}
+	}
+
+	table.UpdatedAt = time.Now()
+
+	// Log next round
+	LogGameAction(GameActionLogRequest{
+		GameID:     gameID,
+		ActionType: "next_round",
+		PlayerSeat: 0,
+		PlayerID:   "",
+		ActionData: map[string]interface{}{
+			"new_level":       newLevel,
+			"starting_dealer": startingDealer,
+			"previous_result": table.PreviousResult,
+		},
+	})
+
+	return table, nil
+}
+
 // GetGamePlayersWithInfo returns detailed player information for a game
 func GetGamePlayersWithInfo(gameID string) ([]*PlayerInfo, error) {
 	query := `
@@ -1634,7 +1793,8 @@ func CalculateLevelUp(score int, isSolo bool, winnerIsDefender bool) int {
 }
 
 // RecordGameResult records the result of a game for all players
-func RecordGameResult(gameID string, results []GameResult, dealerSeat int, winnerTeam string, friendSeat int, isSolo bool) error {
+// keepPlaying: if true, keeps game status as "playing" (multi-round mode); if false, marks as "finished"
+func RecordGameResult(gameID string, results []GameResult, dealerSeat int, winnerTeam string, friendSeat int, isSolo bool, keepPlaying bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -1673,11 +1833,6 @@ func RecordGameResult(gameID string, results []GameResult, dealerSeat int, winne
 		}
 	}
 
-	// Update game status
-	if _, err := tx.Exec(`UPDATE games SET status = 'finished' WHERE id = $1`, gameID); err != nil {
-		return err
-	}
-
 	// 记录游戏结束日志
 	levelChanges := make([]map[string]interface{}, 0, len(results))
 	for _, r := range results {
@@ -1703,17 +1858,21 @@ func RecordGameResult(gameID string, results []GameResult, dealerSeat int, winne
 		},
 	})
 
-	// Update game status with previous result info for next game
 	// 保存上一局结果到数据库，供下一局使用
+	// keepPlaying: true 时保持 "playing" 状态（多局模式），false 时设为 "finished"
+	newStatus := "finished"
+	if keepPlaying {
+		newStatus = "playing"
+	}
 	if _, err := tx.Exec(`
 		UPDATE games
-		SET status = 'finished',
+		SET status = $6,
 		    previous_dealer_seat = $2,
 		    previous_winner_team = $3,
 		    previous_friend_seat = $4,
 		    previous_is_solo = $5
 		WHERE id = $1
-	`, gameID, dealerSeat, winnerTeam, friendSeat, isSolo); err != nil {
+	`, gameID, dealerSeat, winnerTeam, friendSeat, isSolo, newStatus); err != nil {
 		return err
 	}
 
@@ -1790,24 +1949,48 @@ type GameResult struct {
 }
 
 // PlayCardsGame plays multiple cards from a player's hand
-// isTrickComplete checks if all 5 players have played in the current trick
-func isTrickComplete(currentTrick []PlayedCard) bool {
-	if len(currentTrick) == 0 {
+// isTrickComplete checks if a trick is complete.
+func isTrickComplete(table *GameTable) bool {
+	if len(table.CurrentTrick) == 0 {
 		return false
 	}
-
-	// Count unique seats that have played
-	seatsPlayed := make(map[int]bool)
-	for _, pc := range currentTrick {
-		seatsPlayed[pc.Seat] = true
+	seatsActed := make(map[int]bool)
+	for _, pc := range table.CurrentTrick {
+		seatsActed[pc.Seat] = true
 	}
+	totalPlayers := len(table.PlayerHands)
+	passCount := table.TrickPassCount
+	return len(seatsActed)+passCount == totalPlayers && seatsActed[table.TrickLeader]
+}
 
-	// Trick is complete when all 5 players have played
-	return len(seatsPlayed) == 5
+// advanceCallingPlayer advances CurrentPlayer to the next player who hasn't acted
+// in the calling phase (counter-clockwise: 1→5→4→3→2→1)
+func advanceCallingPlayer(table *GameTable) {
+	totalPlayers := len(table.PlayerHands)
+	acted := make(map[int]bool)
+	for _, r := range table.CallRecords {
+		acted[r.Seat] = true
+	}
+	for _, s := range table.PassedSeats {
+		acted[s] = true
+	}
+	current := table.CurrentPlayer
+	for i := 0; i < totalPlayers; i++ {
+		next := ((current - 2 + 5) % 5) + 1
+		if !acted[next] {
+			table.CurrentPlayer = next
+			return
+		}
+		current = next
+	}
 }
 
 // PassTurn handles a player passing their turn (不出)
 func PassTurn(gameID, userID string) (*PlayResult, error) {
+	lock := getGameLock(gameID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
@@ -1851,8 +2034,14 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 		NextPlayer: nextPlayer,
 	}
 
+	// Count this pass toward the trick completion check
+	table.TrickPassCount++
+
+	fmt.Printf("[DEBUG] PassTurn: playerSeat=%d, CurrentPlayer=%d, trickLen=%d, isComplete=%v\n",
+		playerSeat, table.CurrentPlayer, len(table.CurrentTrick), isTrickComplete(table))
+
 	// Check if trick is complete (all 5 players have played or passed)
-	if isTrickComplete(table.CurrentTrick) {
+	if isTrickComplete(table) {
 		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
@@ -1881,6 +2070,7 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
+		table.TrickPassCount = 0
 		result.NextPlayer = winner
 	}
 
@@ -1894,6 +2084,10 @@ func PassTurn(gameID, userID string) (*PlayResult, error) {
 }
 
 func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error) {
+	lock := getGameLock(gameID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
@@ -2066,8 +2260,18 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		Message: fmt.Sprintf("Played %d cards", len(cardsToPlay)),
 	}
 
+	// Update next player if trick not yet complete
+	if !isTrickComplete(table) {
+		result.NextPlayer = ((playerSeat - 2 + 5) % 5) + 1
+		table.CurrentPlayer = result.NextPlayer
+		fmt.Printf("[DEBUG] seat%d played %v, trick NOT complete, nextPlayer=%d, trickLen=%d\n",
+			playerSeat, cardsToPlay, result.NextPlayer, len(table.CurrentTrick))
+	} else {
+		fmt.Printf("[DEBUG] seat%d played %v, trick IS complete!\n", playerSeat, cardsToPlay)
+	}
+
 	// Check if trick is complete (all 5 players have played)
-	if isTrickComplete(table.CurrentTrick) {
+	if isTrickComplete(table) {
 		winner := determineTrickWinner(table.CurrentTrick, table.TrumpSuit, table.TrumpRank)
 		result.TrickComplete = true
 		result.TrickWinner = winner
@@ -2135,6 +2339,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 		table.CurrentTrick = make([]PlayedCard, 0)
 		table.CurrentPlayer = winner
 		table.TrickLeader = winner
+		table.TrickPassCount = 0
 
 		// Check if game ended (all cards played)
 		allCardsPlayed := true
@@ -2149,7 +2354,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 			// Game ended - calculate final scores and results
 			result.GameEnded = true
 			table.Status = "finished"
-			UpdateGameStatus(gameID, "finished")
+			// 注意：不调用 UpdateGameStatus(gameID, "finished")，保持 "playing" 状态以便新一局继续
 
 			// Calculate total points collected by non-host team
 			totalPoints := 0
@@ -2178,10 +2383,10 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 			result.FinalScore = totalPoints
 
 			// Determine winner team based on score
-			if totalPoints >= 120 {
-				result.WinnerTeam = "guest" // 抓分方获胜
+			if totalPoints > 120 {
+				result.WinnerTeam = "guest" // 抓分方获胜（得分超过120）
 			} else {
-				result.WinnerTeam = "host" // 庄家方获胜
+				result.WinnerTeam = "host" // 庄家方获胜（得分≤120）
 			}
 
 			// Calculate level changes
@@ -2240,8 +2445,18 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 				if !table.FriendRevealed {
 					friendSeat = 0
 				}
-				if err := RecordGameResult(gameID, gameResults, table.DealerSeat, result.WinnerTeam, friendSeat, isSolo); err != nil {
+				if err := RecordGameResult(gameID, gameResults, table.DealerSeat, result.WinnerTeam, friendSeat, isSolo, true); err != nil {
 					fmt.Printf("Failed to record game result: %v\n", err)
+				}
+
+				// 存储结算信息到 table，供前端读取
+				table.TotalPoints = totalPoints
+				table.RoundResults = gameResults
+				table.PreviousResult = &PreviousGameResult{
+					WinnerTeam: result.WinnerTeam,
+					DealerSeat: table.DealerSeat,
+					FriendSeat: friendSeat,
+					IsSoloMode: isSolo,
 				}
 
 				// Create game replay
@@ -3369,6 +3584,10 @@ func validateSingleSuitFollow(cards []Card, leadSuit string, trumpRank string) e
 // 玩家用级牌叫庄，决定主牌花色
 // 允许在发牌阶段(dealing)和叫庄阶段(calling)抢庄
 func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTable, error) {
+	lock := getGameLock(gameID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
@@ -3593,6 +3812,8 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		table.CallCountdown = 3
 	}
 
+	// 推进到下一个未行动的叫庄玩家
+	advanceCallingPlayer(table)
 	table.UpdatedAt = time.Now()
 
 	// 保存游戏状态到内存
@@ -3606,6 +3827,10 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 // PassCall handles a player passing on calling for dealer (不叫)
 // 玩家选择不叫庄
 func PassCall(gameID, userID string) (*GameTable, error) {
+	lock := getGameLock(gameID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
@@ -3722,6 +3947,9 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 				"call_phase": "flipping",
 			},
 		})
+	} else {
+		// 推进到下一个未行动的叫庄玩家
+		advanceCallingPlayer(table)
 	}
 
 	table.UpdatedAt = time.Now()
@@ -4023,65 +4251,61 @@ func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
 
 	// 规则4.1-4.2：庄家流程
 	// 1. 拿底牌（上面已完成）
-	// 2. 叫朋友（进入calling_friend状态）
-	// 3. 扣回底牌（叫朋友完成后进行）
-	table.Status = "calling_friend"
-	table.CallPhase = "calling_friend"
+	// 2. 扣回底牌（先扣7张牌）
+	// 3. 叫朋友（扣牌完成后进行）
+	table.Status = "discarding"
+	table.CallPhase = "discarding"
 	table.UpdatedAt = time.Now()
 
-	// 单人模式：如果庄家是AI，自动叫朋友并扣底
+	// 单人模式：如果庄家是AI，自动扣底并叫朋友
 	if isSinglePlayerGame(table) && table.DealerSeat != 1 {
-		// AI庄家自动叫一张黑桃A（第1张）
-		// 这样通常会让AI单打（因为AI手中可能没有黑桃A）
+		// AI庄家自动扣底：选择最小的7张牌
 		dealerHand, ok := table.PlayerHands[table.DealerSeat]
-		if ok {
-			// 自动叫朋友：黑桃A第1张
-			err := CallFriendCard(table.GameID, dealerHand.UserID, "spades", "A", 1)
-			if err != nil {
-				// 如果叫黑桃A失败（可能在叫庄记录中），尝试叫红桃A
-				err = CallFriendCard(table.GameID, dealerHand.UserID, "hearts", "A", 1)
-				if err != nil {
-					// 如果还是失败，记录错误但继续游戏
-					// 让前端或用户处理
-					fmt.Printf("AI auto-call friend failed: %v\n", err)
-				}
+		if ok && dealerHand != nil && len(dealerHand.Cards) == 38 {
+			// 找出最小的7张牌（按点数排序）
+			cardValues := map[string]int{
+				"2": 15, "A": 14, "K": 13, "Q": 12, "J": 11,
+				"10": 10, "9": 9, "8": 8, "7": 7, "6": 6,
+				"5": 5, "4": 4, "3": 3, "big": 17, "small": 16,
 			}
 
-			// 自动扣底：选择最小的7张牌
-			// 重新获取table，因为CallFriendCard可能已经更新了状态
+			// 创建带索引的牌列表
+			type indexedCard struct {
+				index int
+				value int
+			}
+			cards := make([]indexedCard, len(dealerHand.Cards))
+			for i, card := range dealerHand.Cards {
+				cards[i] = indexedCard{index: i, value: cardValues[card.Value]}
+			}
+
+			// 按点数排序（从小到大）
+			sort.Slice(cards, func(i, j int) bool {
+				return cards[i].value < cards[j].value
+			})
+
+			// 选择最小的7张牌的索引
+			discardIndices := make([]int, 7)
+			for i := 0; i < 7; i++ {
+				discardIndices[i] = cards[i].index
+			}
+
+			// 自动扣底
+			DiscardBottomCards(table.GameID, dealerHand.UserID, discardIndices)
+
+			// 扣底完成后，自动叫朋友：黑桃A第1张
+			// 重新获取table，因为DiscardBottomCards可能已经更新了状态
 			table, _ = GetTableGame(table.GameID)
 			dealerHand = table.PlayerHands[table.DealerSeat]
-			if dealerHand != nil && len(dealerHand.Cards) == 38 {
-				// 找出最小的7张牌（按点数排序）
-				cardValues := map[string]int{
-					"2": 15, "A": 14, "K": 13, "Q": 12, "J": 11,
-					"10": 10, "9": 9, "8": 8, "7": 7, "6": 6,
-					"5": 5, "4": 4, "3": 3, "big": 17, "small": 16,
+			if dealerHand != nil {
+				_, err := CallFriendCard(table.GameID, dealerHand.UserID, "spades", "A", 1)
+				if err != nil {
+					// 如果叫黑桃A失败（可能在叫庄记录中），尝试叫红桃A
+					_, err = CallFriendCard(table.GameID, dealerHand.UserID, "hearts", "A", 1)
+					if err != nil {
+						fmt.Printf("AI auto-call friend failed: %v\n", err)
+					}
 				}
-
-				// 创建带索引的牌列表
-				type indexedCard struct {
-					index int
-					value int
-				}
-				cards := make([]indexedCard, len(dealerHand.Cards))
-				for i, card := range dealerHand.Cards {
-					cards[i] = indexedCard{index: i, value: cardValues[card.Value]}
-				}
-
-				// 按点数排序（从小到大）
-				sort.Slice(cards, func(i, j int) bool {
-					return cards[i].value < cards[j].value
-				})
-
-				// 选择最小的7张牌的索引
-				discardIndices := make([]int, 7)
-				for i := 0; i < 7; i++ {
-					discardIndices[i] = cards[i].index
-				}
-
-				// 自动扣底
-				DiscardBottomCards(table.GameID, dealerHand.UserID, discardIndices)
 			}
 		}
 	}
@@ -4090,7 +4314,7 @@ func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
 }
 
 // DiscardBottomCards 庄家扣牌（选择7张牌扣回底牌）
-// 规则4.1：庄家在叫朋友之后扣回7张底牌
+// 规则4.1：庄家在扣底完成后进入叫朋友阶段
 func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
@@ -4162,11 +4386,10 @@ func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameT
 		},
 	})
 
-	// 扣牌完成后，进入出牌阶段
-	// 规则：扣牌完成后开始出牌，庄家先出
-	table.Status = "playing"
-	table.CurrentPlayer = table.DealerSeat
-	table.CallPhase = "finished"
+	// 扣牌完成后，进入叫朋友阶段
+	// 规则：庄家扣底后需要叫朋友
+	table.Status = "calling_friend"
+	table.CallPhase = "calling_friend"
 	table.UpdatedAt = time.Now()
 
 	return table, nil

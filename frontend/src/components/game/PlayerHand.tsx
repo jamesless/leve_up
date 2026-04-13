@@ -93,7 +93,7 @@ export default function PlayerHand({
         if (aIsTrumpRank && !bIsTrumpRank) return -1;
         if (!aIsTrumpRank && bIsTrumpRank) return 1;
 
-        const suitDiff = (suitOrder[a.suit] ?? 4) - (suitOrder[b.suit] ?? 4);
+        const suitDiff = (a.suit === trumpSuit ? -1 : (suitOrder[a.suit] ?? 4)) - (b.suit === trumpSuit ? -1 : (suitOrder[b.suit] ?? 4));
         if (suitDiff !== 0) return suitDiff;
         return valueOrder[b.value] - valueOrder[a.value];
       }

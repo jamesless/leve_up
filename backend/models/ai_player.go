@@ -146,65 +146,132 @@ func (ai *AIPlayer) DecidePlay(table *GameTable) []int {
 }
 
 // decideLeadCards chooses cards when leading a trick
+// 策略：优先出自己手上最大的牌
+// 优先级：拖拉机 > 三张 > 对子 > A单张
 func (ai *AIPlayer) decideLeadCards(table *GameTable) []int {
-	// Try to throw cards (甩牌) if we have a strong suit
+	// 1. 优先尝试甩牌（如果能成功甩出大牌）
 	if throwIndices := ai.tryThrowCards(table); len(throwIndices) > 0 {
 		return throwIndices
 	}
 
-	// Try to lead with a pair or triple if we have one
-	if pairIndices := ai.findStrongestPair(); len(pairIndices) > 0 {
+	// 2. 找拖拉机（连对）- 最高优先级
+	if tractorIndices := ai.findStrongestTractor(table); len(tractorIndices) > 0 {
+		return tractorIndices
+	}
+
+	// 3. 找三张
+	if tripleIndices := ai.findStrongestTriple(table); len(tripleIndices) > 0 {
+		return tripleIndices
+	}
+
+	// 4. 找对子（按强度排序）
+	if pairIndices := ai.findStrongestPair(table); len(pairIndices) > 0 {
 		return pairIndices
 	}
 
-	// Strategy: Lead with a low card from a long suit to drain opponents
-	// Or lead with a strong card if we want to win the trick
-
-	// Count cards by suit
-	suitCounts := make(map[string]int)
-	for _, card := range ai.Hand {
-		suitCounts[card.Suit]++
+	// 5. 出A级别的单张
+	if aceIndices := ai.findStrongestSingle(table); len(aceIndices) > 0 {
+		return aceIndices
 	}
 
-	// Find longest suit
-	longestSuit := ""
-	maxCount := 0
-	for suit, count := range suitCounts {
-		if count > maxCount {
-			maxCount = count
-			longestSuit = suit
-		}
-	}
-
-	// Get non-trump cards of longest suit (if trump is set)
-	var candidates []int
-	for i, card := range ai.Hand {
-		if card.Suit == longestSuit {
-			// If trump is set and this is trump, skip
-			if table.TrumpSuit != "" && card.Suit == table.TrumpSuit {
-				continue
-			}
-			candidates = append(candidates, i)
-		}
-	}
-
-	// If no candidates, just use lowest card overall
-	if len(candidates) == 0 {
-		lowestIdx := ai.findLowestCard()
-		return []int{lowestIdx}
-	}
-
-	// Sort candidates by card value (ascending for lowest first)
-	sort.Slice(candidates, func(i, j int) bool {
-		return getCardBaseValue(ai.Hand[candidates[i]]) < getCardBaseValue(ai.Hand[candidates[j]])
-	})
-
-	// Play lowest card from the longest suit (conservative strategy)
-	return []int{candidates[0]}
+	// 6. 保底：出最小的牌
+	lowestIdx := ai.findLowestCard()
+	return []int{lowestIdx}
 }
 
-// findStrongestPair finds the strongest pair or triple to lead with
-func (ai *AIPlayer) findStrongestPair() []int {
+// findStrongestTractor finds the strongest tractor (连对) to lead with
+// 拖拉机定义：两对或以上相同花色、连续点数的对子
+func (ai *AIPlayer) findStrongestTractor(table *GameTable) []int {
+	// 按花色分组
+	suitCards := make(map[string][]Card)
+	for _, card := range ai.Hand {
+		suitCards[card.Suit] = append(suitCards[card.Suit], card)
+	}
+
+	// 遍历每个花色找拖拉机
+	var bestTractor []int
+	bestStrength := -1
+
+	for suit := range suitCards {
+		// 跳过主牌花色（用主牌打拖拉机太浪费）
+		if suit == table.TrumpSuit {
+			continue
+		}
+
+		// 按点数分组找对子
+		valuePairs := make(map[string][]int) // 点数 -> 手牌索引
+		for i, card := range ai.Hand {
+			if card.Suit == suit {
+				valuePairs[card.Value] = append(valuePairs[card.Value], i)
+			}
+		}
+
+		// 提取有对子的点数
+		var pairValues []string
+		for value, indices := range valuePairs {
+			if len(indices) >= 2 {
+				pairValues = append(pairValues, value)
+			}
+		}
+
+		if len(pairValues) < 2 {
+			continue // 至少需要两对对子才能组成拖拉机
+		}
+
+		// 按点数排序（从大到小）
+		sort.Slice(pairValues, func(i, j int) bool {
+			return getCardValueInt(pairValues[i]) > getCardValueInt(pairValues[j])
+		})
+
+		// 找最长、最强的拖拉机
+		for start := 0; start < len(pairValues)-1; start++ {
+			// 找连续的对子
+			var tractorValues []string
+			tractorValues = append(tractorValues, pairValues[start])
+			prevValue := pairValues[start]
+
+			for next := start + 1; next < len(pairValues); next++ {
+				if isConsecutiveValue(prevValue, pairValues[next]) {
+					tractorValues = append(tractorValues, pairValues[next])
+					prevValue = pairValues[next]
+				} else {
+					break
+				}
+			}
+
+			// 至少需要2对才能组成拖拉机
+			if len(tractorValues) >= 2 {
+				// 计算拖拉机强度（使用最大对子的点数）
+				strength := getCardValueInt(tractorValues[0])
+				if strength > bestStrength {
+					// 收集所有对子的牌索引
+					var indices []int
+					for _, value := range tractorValues {
+						indices = append(indices, valuePairs[value][:2]...)
+					}
+					bestTractor = indices
+					bestStrength = strength
+				}
+			}
+		}
+	}
+
+	return bestTractor
+}
+
+// isConsecutiveValue checks if two card values are consecutive
+func isConsecutiveValue(v1, v2 string) bool {
+	val1 := getCardValueInt(v1)
+	val2 := getCardValueInt(v2)
+	diff := val1 - val2
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff == 1
+}
+
+// findStrongestTriple finds the strongest triple (三张) to lead with
+func (ai *AIPlayer) findStrongestTriple(table *GameTable) []int {
 	// Count cards by suit and value
 	type CardKey struct {
 		suit  string
@@ -217,31 +284,114 @@ func (ai *AIPlayer) findStrongestPair() []int {
 		cardGroups[key] = append(cardGroups[key], i)
 	}
 
-	// Find triples first (priority)
+	var bestTriple []int
+	bestStrength := -1
+
+	// Find triples (priority over pairs)
 	for _, indices := range cardGroups {
 		if len(indices) >= 3 {
-			return indices[:3]
+			// 跳过主牌花色的三张（用主牌打出去太浪费）
+			suit := ai.Hand[indices[0]].Suit
+			if suit == table.TrumpSuit {
+				continue
+			}
+			strength := getCardValueInt(ai.Hand[indices[0]].Value)
+			if strength > bestStrength {
+				bestTriple = indices[:3]
+				bestStrength = strength
+			}
 		}
 	}
+
+	return bestTriple
+}
+
+// findStrongestPair finds the strongest pair to lead with
+func (ai *AIPlayer) findStrongestPair(table *GameTable) []int {
+	// Count cards by suit and value
+	type CardKey struct {
+		suit  string
+		value string
+	}
+	cardGroups := make(map[CardKey][]int)
+
+	for i, card := range ai.Hand {
+		key := CardKey{suit: card.Suit, value: card.Value}
+		cardGroups[key] = append(cardGroups[key], i)
+	}
+
+	var bestPair []int
+	bestStrength := -1
 
 	// Find pairs
 	for _, indices := range cardGroups {
 		if len(indices) >= 2 {
-			return indices[:2]
+			// 跳过主牌花色的对子
+			suit := ai.Hand[indices[0]].Suit
+			if suit == table.TrumpSuit {
+				continue
+			}
+			strength := getCardValueInt(ai.Hand[indices[0]].Value)
+			if strength > bestStrength {
+				bestPair = indices[:2]
+				bestStrength = strength
+			}
 		}
+	}
+
+	return bestPair
+}
+
+// findStrongestSingle finds the strongest single card (A or high card) to lead with
+func (ai *AIPlayer) findStrongestSingle(table *GameTable) []int {
+	// Find Aces and high cards
+	var candidates []int
+	for i, card := range ai.Hand {
+		// 跳过主牌
+		if card.Suit == table.TrumpSuit {
+			continue
+		}
+		// 只考虑A、K、Q、J、10这些大牌
+		strength := getCardValueInt(card.Value)
+		if strength >= 10 {
+			candidates = append(candidates, i)
+		}
+	}
+
+	if len(candidates) > 0 {
+		// 按强度降序排列
+		sort.Slice(candidates, func(i, j int) bool {
+			return getCardValueInt(ai.Hand[candidates[i]].Value) > getCardValueInt(ai.Hand[candidates[j]].Value)
+		})
+		return []int{candidates[0]}
 	}
 
 	return nil
 }
 
+// getCardValueInt returns numeric value for card comparison
+func getCardValueInt(value string) int {
+	values := map[string]int{
+		"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+		"10": 10, "J": 11, "Q": 12, "K": 13, "A": 14,
+	}
+	if val, ok := values[value]; ok {
+		return val
+	}
+	return 0
+}
+
 // tryThrowCards attempts to find a valid throw (甩牌)
-// Returns card indices if a throw is possible, empty otherwise
+// 优先甩大牌：如果有多个花色可以甩，选择最强的大牌
 func (ai *AIPlayer) tryThrowCards(table *GameTable) []int {
 	// Group cards by suit
 	suitCards := make(map[string][]int)
 	for i, card := range ai.Hand {
 		suitCards[card.Suit] = append(suitCards[card.Suit], i)
 	}
+
+	var bestThrow []int
+	bestStrength := -1
 
 	// For each suit, check if we can throw
 	for suit, indices := range suitCards {
@@ -263,13 +413,24 @@ func (ai *AIPlayer) tryThrowCards(table *GameTable) []int {
 		// Validate throw
 		result := ValidateThrowCards(cards, table, ai.SeatNumber)
 		if result.IsValid {
-			// Return indices of cards to throw
-			return indices
+			// 计算该花色的最大牌强度
+			maxStrength := 0
+			for _, idx := range indices {
+				strength := getCardValueInt(ai.Hand[idx].Value)
+				if strength > maxStrength {
+					maxStrength = strength
+				}
+			}
+
+			// 选择强度最大的甩牌
+			if maxStrength > bestStrength {
+				bestStrength = maxStrength
+				bestThrow = indices
+			}
 		}
 	}
 
-	// No valid throw found
-	return nil
+	return bestThrow
 }
 
 // decideFollowCards chooses cards when following a lead

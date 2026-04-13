@@ -68,6 +68,30 @@ export interface IGameState {
   dealtCardCount?: number;
   totalCardsPerPlayer?: number;
   dealingPhase?: string;
+  // 本局结算
+  totalPoints?: number;   // 抓分方总得分
+  roundResults?: IGameRoundResult[]; // 每个玩家的结算结果
+  lastPlay?: ILastPlay;  // 最后一手牌结果（含结算信息）
+}
+
+export interface IGameRoundResult {
+  user_id: string;
+  old_level: string;
+  new_level: string;
+  is_winner: boolean;
+  score: number;
+}
+
+export interface ILastPlay {
+  success: boolean;
+  message: string;
+  nextPlayer: number;
+  trickComplete: boolean;
+  trickWinner?: number;
+  gameEnded?: boolean;
+  winnerTeam?: 'host' | 'guest';
+  finalScore?: number;
+  gameResults?: IGameRoundResult[];
 }
 
 export interface ICallRecord {
@@ -91,6 +115,7 @@ export interface ICreateGameRequest {
 export interface IGameResponse {
   success: boolean;
   game?: IGameState;
+  table?: IGameState;
   error?: string;
 }
 

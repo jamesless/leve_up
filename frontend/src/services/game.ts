@@ -126,3 +126,13 @@ export interface IPlayerPlayedCardsResponse {
 
 export const getPlayerPlayedCards = (id: string) =>
   get<IPlayerPlayedCardsResponse>(`/game/${id}/played-cards`);
+
+// 开始新的一局
+export interface INextRoundResponse {
+  success: boolean;
+  message?: string;
+  table?: unknown;
+}
+
+export const nextRound = (id: string) =>
+  post<INextRoundResponse>(`/game/${id}/next-round`);

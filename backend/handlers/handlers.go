@@ -424,7 +424,7 @@ func CallFriendHandler(c *gin.Context) {
 		}
 	}
 
-	err := models.CallFriendCard(gameID, user.ID, suit, value, position)
+	table, err := models.CallFriendCard(gameID, user.ID, suit, value, position)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
@@ -455,8 +455,40 @@ func CallFriendHandler(c *gin.Context) {
 		})
 	}
 
+	// Build dealerTeam and scores from table data
+	dealerTeam := make([]int, 0, 2)
+	if table.DealerSeat > 0 {
+		dealerTeam = append(dealerTeam, table.DealerSeat)
+	}
+	if table.FriendRevealed && table.FriendSeat > 0 {
+		dealerTeam = append(dealerTeam, table.FriendSeat)
+	}
+	scores := make(map[int]int)
+	for seat, hand := range table.PlayerHands {
+		scores[seat] = hand.Score
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
+		"table":   table,
+		"game": map[string]interface{}{
+			"id":             table.GameID,
+			"status":         table.Status,
+			"currentLevel":   table.CurrentLevel,
+			"currentPlayer":  table.CurrentPlayer,
+			"dealerTeam":     dealerTeam,
+			"trumpSuit":      table.TrumpSuit,
+			"trumpRank":      table.TrumpRank,
+			"bottomCards":    table.BottomCards,
+			"scores":         scores,
+			"dealerSeat":     table.DealerSeat,
+			"callRecords":    table.CallRecords,
+			"passedSeats":    table.PassedSeats,
+			"callPhase":      table.CallPhase,
+			"hostCalledCard": table.HostCalledCard,
+			"friendRevealed": table.FriendRevealed,
+			"friendSeat":     table.FriendSeat,
+		},
 		"message": "Friend card called",
 	})
 }
@@ -562,9 +594,9 @@ func PlayerReadyHandler(c *gin.Context) {
 	// 获取准备状态列表
 	readyStates, _ := models.GetPlayersReadyStatus(gameID)
 
-	// 检查是否5人且全部准备
+	// 检查是否满足开始条件（5人全准备 或 3人全准备）
 	allReady, totalPlayers, err := models.AreAllPlayersReady(gameID)
-	if err == nil && allReady && totalPlayers == 5 {
+	if err == nil && allReady && (totalPlayers == 5 || totalPlayers >= 3) {
 		// 自动开始游戏
 		table, err := models.StartGame(gameID, game.HostID)
 		if err == nil {
@@ -1030,6 +1062,12 @@ func GetGameTableHandler(c *gin.Context) {
 		"passedSeats":        table.PassedSeats,
 		"callCountdown":      table.CallCountdown,
 		"callPhase":          table.CallPhase,
+		"hostCalledCard":     table.HostCalledCard,
+		"friendRevealed":     table.FriendRevealed,
+		"friendSeat":         table.FriendSeat,
+		// 本局结算信息
+		"totalPoints":  table.TotalPoints,
+		"roundResults": table.RoundResults,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1216,5 +1254,28 @@ func GetPlayerPlayedCardsHandler(c *gin.Context) {
 		"playedCards": playedCards,
 		"count":       len(playedCards),
 		"playerSeat":  playerSeat,
+	})
+}
+
+// NextRoundHandler 开始新的一局
+func NextRoundHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, err := models.NextRound(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// WebSocket 广播新一局开始
+	game, _ := models.GetGame(gameID)
+	if hub := GetWebSocketHub(); hub != nil && game != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "新一局开始",
 	})
 }

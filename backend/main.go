@@ -113,6 +113,7 @@ func main() {
 			protected.POST("/game/:id/play", handlers.PlayCard)
 			protected.POST("/game/:id/pass", handlers.PassTurnHandler)
 			protected.POST("/game/:id/ai-play", handlers.AIPlayHandler)
+			protected.POST("/game/:id/next-round", handlers.NextRoundHandler)
 			// Replay APIs
 			protected.GET("/game/:id/replay", handlers.GetGameReplayHandler)
 			protected.GET("/game/:id/actions", handlers.GetGameActionsHandler)

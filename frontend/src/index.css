@@ -1318,6 +1318,138 @@
     100% { opacity: 0;    transform: translateY(-120px) scale(0.2); }
   }
 
+  /* ============================
+     庄家/盟友着火特效 — 火焰向右吹
+     ============================ */
+
+  /* 火焰层容器 */
+  .fire-border {
+    position: relative;
+  }
+  .fire-border::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      #ff4500 15%,
+      #ff6600 30%,
+      #ffcc00 50%,
+      #ff9900 70%,
+      #ff4500 85%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: fire-flow 1.2s linear infinite;
+    z-index: 0;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    padding: 2px;
+    pointer-events: none;
+  }
+
+  /* 火焰粒子 */
+  .fire-particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 0;
+  }
+  .fire-particles::before,
+  .fire-particles::after {
+    content: '';
+    position: absolute;
+    border-radius: 50% 50% 20% 50%;
+    filter: blur(2px);
+    pointer-events: none;
+  }
+  .fire-particles::before {
+    width: 6px; height: 10px;
+    background: radial-gradient(#ff6600, #ff3300 60%, transparent 100%);
+    left: -4px; bottom: 30%;
+    animation: fire-wisp-1 0.8s ease-in-out infinite;
+  }
+  .fire-particles::after {
+    width: 4px; height: 7px;
+    background: radial-gradient(#ffcc00, #ff6600 60%, transparent 100%);
+    left: -2px; bottom: 55%;
+    animation: fire-wisp-2 0.6s ease-in-out infinite 0.2s;
+  }
+
+  /* 火焰流光 */
+  @keyframes fire-flow {
+    0%   { background-position: 0% 0%; }
+    100% { background-position: 200% 0%; }
+  }
+  /* 火苗向左下角飘出 */
+  @keyframes fire-wisp-1 {
+    0%   { transform: translate(0, 0) scale(1);   opacity: 0.9; }
+    50%  { transform: translate(8px, 4px) scale(0.8) rotate(10deg); opacity: 0.6; }
+    100% { transform: translate(14px, 10px) scale(0.3) rotate(20deg); opacity: 0; }
+  }
+  /* 火苗向右下角飘出 */
+  @keyframes fire-wisp-2 {
+    0%   { transform: translate(0, 0) scale(1);   opacity: 0.8; }
+    50%  { transform: translate(6px, -2px) scale(0.7) rotate(-8deg); opacity: 0.5; }
+    100% { transform: translate(12px, 6px) scale(0.2) rotate(-15deg); opacity: 0; }
+  }
+
+  /* ============================
+     1打4蓝色火焰特效
+     ============================ */
+  .fire-blue {
+    position: relative;
+  }
+  .fire-blue::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      #0066ff 15%,
+      #0099ff 30%,
+      #66ccff 50%,
+      #0099ff 70%,
+      #0066ff 85%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: fire-flow 1.2s linear infinite;
+    z-index: 0;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    padding: 2px;
+    pointer-events: none;
+  }
+  /* 蓝色火焰粒子 */
+  .fire-particles-blue::before,
+  .fire-particles-blue::after {
+    content: '';
+    position: absolute;
+    border-radius: 50% 50% 20% 50%;
+    filter: blur(2px);
+    pointer-events: none;
+  }
+  .fire-particles-blue::before {
+    width: 6px; height: 10px;
+    background: radial-gradient(#0099ff, #0066ff 60%, transparent 100%);
+    left: -4px; bottom: 30%;
+    animation: fire-wisp-1 0.8s ease-in-out infinite;
+  }
+  .fire-particles-blue::after {
+    width: 4px; height: 7px;
+    background: radial-gradient(#66ccff, #0099ff 60%, transparent 100%);
+    left: -2px; bottom: 55%;
+    animation: fire-wisp-2 0.6s ease-in-out infinite 0.2s;
+  }
+
   /* 20 个粒子分布在整个页面（作为 .auth-particles 的子元素） */
   .auth-particles .auth-particle:nth-child(1)  { width: 3px; height: 3px; left: 5%;  top: 80%; animation-delay: 0s;    animation-duration: 9s;  }
   .auth-particles .auth-particle:nth-child(2)  { width: 2px; height: 2px; left: 12%; top: 90%; animation-delay: 1.2s;  animation-duration: 7s;  }
