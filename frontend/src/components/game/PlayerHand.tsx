@@ -4,6 +4,7 @@ import type { ICard } from '@/types';
 import { ECardSuit } from '@/types';
 import { useEffect, useRef, useMemo, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { isJoker, isBigJoker } from '@/lib/card';
 
 interface IPlayerHandProps {
   cards: ICard[];
@@ -18,6 +19,8 @@ interface IPlayerHandProps {
     count: number;
   }; // 盟友牌信息
   size?: 'xs' | 'sm' | 'md' | 'lg'; // 牌的大小
+  otherCalledRank?: string; // 对方叫的级牌（用于白色粒子特效）
+  myCalledRank?: string; // 自己叫的级牌（用于金色粒子特效）
 }
 
 export default function PlayerHand({
@@ -28,6 +31,8 @@ export default function PlayerHand({
   gameStatus,
   friendCard,
   size = 'md',
+  otherCalledRank,
+  myCalledRank,
 }: IPlayerHandProps) {
   const { selectedCardIndices, toggleCard, setCardCount } = useGameStore();
   const prevCount = useRef(cards.length);
@@ -63,8 +68,24 @@ export default function PlayerHand({
       if (aIsTrump && !bIsTrump) return -1;
       if (!aIsTrump && bIsTrump) return 1;
 
-      // 都是主牌：级牌最大优先排前面，然后按花色排序，再按点数排序（从大到小）
+      // 都是主牌：大小王优先排最前，然后级牌，然后按花色排序，再按点数排序（从大到小）
       if (aIsTrump && bIsTrump) {
+        const aIsJokerCard = isJoker(a);
+        const bIsJokerCard = isJoker(b);
+
+        // 大小王优先
+        if (aIsJokerCard && !bIsJokerCard) return -1;
+        if (!aIsJokerCard && bIsJokerCard) return 1;
+
+        // 大王 > 小王
+        if (aIsJokerCard && bIsJokerCard) {
+          const aIsBig = isBigJoker(a);
+          const bIsBig = isBigJoker(b);
+          if (aIsBig && !bIsBig) return -1;
+          if (!aIsBig && bIsBig) return 1;
+          return 0;
+        }
+
         const aIsTrumpRank = a.value === trumpRank;
         const bIsTrumpRank = b.value === trumpRank;
 
@@ -149,18 +170,38 @@ export default function PlayerHand({
     return isTrumpRankCard(card);
   };
 
+  // 判断是否显示对方级牌高亮（叫庄阶段）
+  const shouldHighlightOtherTrumpRank = (card: ICard): boolean => {
+    if (gameStatus !== 'calling') return false;
+    if (!otherCalledRank) return false;
+    if (isTrumpRankCard(card)) return false; // 自己叫的不算
+    return card.value === otherCalledRank;
+  };
+
+  // 获取主牌类型
+  const getTrumpType = (card: ICard): 'mine' | 'other' | 'confirmed' | undefined => {
+    // 叫庄阶段
+    if (gameStatus === 'calling') {
+      if (isTrumpRankCard(card) && myCalledRank) {
+        return 'mine'; // 自己的级牌
+      }
+      if (shouldHighlightOtherTrumpRank(card)) {
+        return 'other'; // 对方的级牌
+      }
+    }
+    // 叫庄结束后，所有主牌
+    if (gameStatus !== 'calling' && gameStatus !== 'waiting') {
+      if (isTrumpCard(card)) {
+        return 'confirmed';
+      }
+    }
+    return undefined;
+  };
+
   // 判断是否显示主牌高亮（叫庄结束后）
   const shouldHighlightTrump = (card: ICard) => {
     // 叫庄阶段结束后才高亮主牌
     if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
-    return isTrumpCard(card);
-  };
-
-  // 判断是否显示主牌标签
-  const shouldShowTrumpLabel = (card: ICard) => {
-    // 叫庄结束后且有主牌信息才显示
-    if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
-    if (!trumpSuit && !trumpRank) return false;
     return isTrumpCard(card);
   };
 
@@ -184,6 +225,10 @@ export default function PlayerHand({
       <div className="md:hidden w-full">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full justify-start overflow-x-auto">
+            {/* 全部手牌标签 */}
+            <TabsTrigger value="all" className="relative">
+              全部 <span className="ml-1 text-xs opacity-70">({sortedCards.length})</span>
+            </TabsTrigger>
             {groupCardsBySuit.trump.length > 0 && (
               <TabsTrigger value="trump" className="relative">
                 主 <span className="ml-1 text-xs opacity-70">({groupCardsBySuit.trump.length})</span>
@@ -210,6 +255,32 @@ export default function PlayerHand({
               </TabsTrigger>
             )}
           </TabsList>
+
+          {/* 全部手牌 */}
+          <TabsContent value="all" className="mt-2">
+            <div className="flex flex-wrap items-end justify-start gap-1">
+              {sortedCards.map((card, i) => {
+                const disabled = isCardDisabled(i);
+                const isFriend = isFriendCard(card);
+                return (
+                  <div key={`${card.suit}-${card.value}-${i}`} className={disabled ? 'opacity-40' : ''}>
+                    <PlayingCard
+                      card={card}
+                      selected={selectedCardIndices.has(sortedToOriginalIndex[i])}
+                      onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
+                      size="sm"
+                      isTrumpRank={shouldHighlightTrumpRank(card)}
+                      isOtherTrumpRank={shouldHighlightOtherTrumpRank(card)}
+                      isTrump={shouldHighlightTrump(card)}
+                      isFriend={isFriend}
+                      trumpType={getTrumpType(card)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </TabsContent>
+
           {Object.entries(groupCardsBySuit).map(([suit, suitCards]) => (
             suitCards.length > 0 && (
               <TabsContent key={suit} value={suit} className="mt-2">
@@ -226,9 +297,10 @@ export default function PlayerHand({
                           onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
                           size="sm"
                           isTrumpRank={shouldHighlightTrumpRank(card)}
+                          isOtherTrumpRank={shouldHighlightOtherTrumpRank(card)}
                           isTrump={shouldHighlightTrump(card)}
-                          showTrumpLabel={shouldShowTrumpLabel(card)}
                           isFriend={isFriend}
+                          trumpType={getTrumpType(card)}
                         />
                       </div>
                     );
@@ -240,7 +312,7 @@ export default function PlayerHand({
         </Tabs>
       </div>
 
-      {/* 桌面端：平铺布局 */}
+      {/* 桌面端：平铺布局（可换行） */}
       <div className="hidden md:flex flex-wrap items-end justify-start gap-1">
         {sortedCards.map((card, i) => {
           const disabled = isCardDisabled(i);
@@ -257,9 +329,10 @@ export default function PlayerHand({
                 onClick={interactive && !disabled ? () => toggleCard(sortedToOriginalIndex[i]) : undefined}
                 size={size}
                 isTrumpRank={shouldHighlightTrumpRank(card)}
+                isOtherTrumpRank={shouldHighlightOtherTrumpRank(card)}
                 isTrump={shouldHighlightTrump(card)}
-                showTrumpLabel={shouldShowTrumpLabel(card)}
                 isFriend={isFriend}
+                trumpType={getTrumpType(card)}
               />
             </div>
           );

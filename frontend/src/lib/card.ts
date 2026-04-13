@@ -5,7 +5,7 @@ const SUIT_SYMBOLS: Record<ECardSuit, string> = {
   [ECardSuit.DIAMONDS]: '♦',
   [ECardSuit.CLUBS]: '♣',
   [ECardSuit.SPADES]: '♠',
-  [ECardSuit.JOKER]: '★',
+  [ECardSuit.JOKER]: '',
 };
 
 const CARD_ORDER: TCardValue[] = [
@@ -26,9 +26,31 @@ export function isRedSuit(suit: ECardSuit): boolean {
 
 export function getCardDisplayValue(card: ICard): string {
   if (card.suit === ECardSuit.JOKER) {
-    return card.value === 'Big' ? '大王' : '小王';
+    const v = String(card.value).toLowerCase();
+    if (v === 'big' || v === '大王') return 'JOKER';
+    if (v === 'small' || v === '小王') return 'joker';
+    return String(card.value);
   }
   return card.value;
+}
+
+export function isJoker(card: ICard): boolean {
+  return card.suit === ECardSuit.JOKER;
+}
+
+export function isBigJoker(card: ICard): boolean {
+  if (card.suit !== ECardSuit.JOKER) return false;
+  const v = String(card.value).toLowerCase();
+  return v === 'big' || v === '大王';
+}
+
+export function getJokerImageUrl(card: ICard): string {
+  if (card.suit !== ECardSuit.JOKER) return '';
+  const v = String(card.value).toLowerCase();
+  if (v === 'big' || v === '大王') {
+    return '/jokers/big-joker.svg';
+  }
+  return '/jokers/small-joker.svg';
 }
 
 export function getCardSortValue(value: TCardValue): number {
@@ -50,7 +72,7 @@ export function getNextLevel(currentLevel: TCardValue): TCardValue {
 
 export function getLevelAfterJump(currentLevel: TCardValue, jump: number): TCardValue {
   const index = LEVELS.indexOf(currentLevel);
-  if (index < 0) return currentLevel;
+  if (index < 0 || index >= LEVELS.length - 1) return currentLevel;
   const newIndex = Math.min(index + jump, LEVELS.length - 1);
   return LEVELS[newIndex];
 }

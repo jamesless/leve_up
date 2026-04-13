@@ -85,11 +85,11 @@
 
   .dark body {
     background: linear-gradient(135deg,
-      hsl(250, 60%, 25%) 0%,
-      hsl(280, 70%, 30%) 25%,
-      hsl(320, 65%, 28%) 50%,
-      hsl(260, 60%, 26%) 75%,
-      hsl(240, 65%, 24%) 100%
+      hsl(250, 55%, 38%) 0%,
+      hsl(280, 65%, 42%) 25%,
+      hsl(320, 60%, 40%) 50%,
+      hsl(260, 55%, 38%) 75%,
+      hsl(240, 60%, 36%) 100%
     );
     background-size: 400% 400%;
     background-attachment: fixed;
@@ -113,12 +113,12 @@
     right: 0;
     bottom: 0;
     background-image:
-      repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(139, 92, 246, 0.08) 40px, rgba(139, 92, 246, 0.08) 80px),
-      repeating-linear-gradient(-45deg, transparent, transparent 40px, rgba(236, 72, 153, 0.08) 40px, rgba(236, 72, 153, 0.08) 80px),
-      radial-gradient(circle at 25% 25%, rgba(139, 92, 246, 0.15) 0%, transparent 15%),
-      radial-gradient(circle at 75% 25%, rgba(236, 72, 153, 0.15) 0%, transparent 15%),
-      radial-gradient(circle at 25% 75%, rgba(59, 130, 246, 0.12) 0%, transparent 15%),
-      radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.12) 0%, transparent 15%);
+      repeating-linear-gradient(45deg, transparent, transparent 40px, rgba(139, 92, 246, 0.12) 40px, rgba(139, 92, 246, 0.12) 80px),
+      repeating-linear-gradient(-45deg, transparent, transparent 40px, rgba(236, 72, 153, 0.12) 40px, rgba(236, 72, 153, 0.12) 80px),
+      radial-gradient(circle at 25% 25%, rgba(139, 92, 246, 0.22) 0%, transparent 15%),
+      radial-gradient(circle at 75% 25%, rgba(236, 72, 153, 0.22) 0%, transparent 15%),
+      radial-gradient(circle at 25% 75%, rgba(59, 130, 246, 0.18) 0%, transparent 15%),
+      radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.18) 0%, transparent 15%);
     pointer-events: none;
     z-index: 0;
   }
@@ -440,7 +440,7 @@
       /* 蓝色调 (secondary) */
       radial-gradient(ellipse 90px 110px at 10% 50%, rgba(59, 130, 246, 0.07) 0%, transparent 70%),
       radial-gradient(ellipse 70px 90px at 90% 55%, rgba(96, 165, 250, 0.06) 0%, transparent 70%);
-    background-color: rgba(30, 20, 60, 0.55);
+    background-color: rgba(60, 40, 100, 0.45);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
   }
@@ -552,8 +552,8 @@
      ============================ */
   .game-control-panel {
     background:
-      radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.10) 0%, transparent 60%),
-      rgba(20, 10, 40, 0.65);
+      radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.12) 0%, transparent 60%),
+      rgba(40, 20, 70, 0.55);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -563,27 +563,118 @@
   }
 
   /* ============================
-     手牌区域玻璃
+     手牌区域玻璃 — Win7 Aero 磨砂玻璃
      ============================ */
   .hand-area-glass {
+    position: relative;
     background:
-      radial-gradient(ellipse at 50% 0%, rgba(139, 92, 246, 0.08) 0%, transparent 60%),
-      rgba(15, 8, 30, 0.8);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+      linear-gradient(150deg,
+        rgba(255, 255, 255, 0.28) 0%,
+        rgba(255, 255, 255, 0.08) 18%,
+        rgba(255, 255, 255, 0.02) 40%,
+        transparent 65%
+      ),
+      rgba(180, 150, 255, 0.12);
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+    border-top: 1px solid rgba(255, 255, 255, 0.45);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.7),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+      0 -4px 24px rgba(139, 92, 246, 0.12);
+  }
+
+  /* Win7 Aero 顶部高光条纹 */
+  .hand-area-glass::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.6) 15%,
+      rgba(255, 255, 255, 0.85) 40%,
+      rgba(255, 255, 255, 0.9) 50%,
+      rgba(255, 255, 255, 0.85) 60%,
+      rgba(255, 255, 255, 0.6) 85%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Win7 Aero 左上角反光 */
+  .hand-area-glass::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 55%;
+    background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.18) 0%,
+      rgba(255, 255, 255, 0.06) 40%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 10;
+    border-radius: inherit;
+  }
+
+  .hand-area-glass > * {
+    position: relative;
+    z-index: 20;
   }
 
   .hand-toggle-bar {
-    background: rgba(139, 92, 246, 0.15);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    background:
+      linear-gradient(150deg,
+        rgba(255, 255, 255, 0.25) 0%,
+        rgba(255, 255, 255, 0.06) 20%,
+        transparent 50%
+      ),
+      rgba(139, 92, 246, 0.12);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.06);
     transition: background 0.3s ease;
   }
 
+  /* Win7 顶部高光 */
+  .hand-toggle-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.7) 20%,
+      rgba(255, 255, 255, 0.9) 50%,
+      rgba(255, 255, 255, 0.7) 80%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
   .hand-toggle-bar:hover {
-    background: rgba(139, 92, 246, 0.25);
+    background:
+      linear-gradient(150deg,
+        rgba(255, 255, 255, 0.32) 0%,
+        rgba(255, 255, 255, 0.10) 20%,
+        transparent 50%
+      ),
+      rgba(139, 92, 246, 0.18);
+    backdrop-filter: blur(24px) saturate(200%);
+    -webkit-backdrop-filter: blur(24px) saturate(200%);
   }
 
   /* ============================
@@ -965,6 +1056,127 @@
   .particle-dot:nth-child(4) { width: 2px; height: 2px; bottom: 15%; left: 25%; --duration: 5.5s; --delay: 1s; }
   .particle-dot:nth-child(5) { width: 2px; height: 2px; top: 10%; right: 20%; --duration: 3.8s; --delay: 2.5s; }
 
+
+  /* ============================
+     级牌闪光卡特效 — 光束扫过
+     ============================ */
+  @keyframes flash-sweep {
+    0%   { transform: translateX(-150%); }
+    60%  { transform: translateX(250%); }
+    100% { transform: translateX(250%); }
+  }
+
+  /* ============================
+     级牌光晕特效 — 典雅流光边框
+     ============================ */
+
+  /* 金色光晕（自己的级牌） */
+  .card-glow-gold {
+    position: relative;
+    animation: glow-gold-breathe 2s ease-in-out infinite;
+  }
+  .card-glow-gold::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 215, 0, 0.3) 30%,
+      rgba(255, 255, 200, 0.8) 50%,
+      rgba(255, 215, 0, 0.3) 70%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    border-radius: 1rem;
+    animation: shimmer-gold 2.5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: -1;
+    filter: blur(3px);
+  }
+
+  @keyframes glow-gold-breathe {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.15); }
+  }
+
+  @keyframes shimmer-gold {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* 白色光晕（对方叫的级牌） */
+  .card-glow-white {
+    position: relative;
+    animation: glow-white-breathe 2s ease-in-out infinite;
+  }
+  .card-glow-white::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.3) 30%,
+      rgba(255, 255, 255, 0.9) 50%,
+      rgba(255, 255, 255, 0.3) 70%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    border-radius: 1rem;
+    animation: shimmer-white 2.5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: -1;
+    filter: blur(3px);
+  }
+
+  @keyframes glow-white-breathe {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.1); }
+  }
+
+  @keyframes shimmer-white {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* 紫金光晕（确定级牌后的主牌） */
+  .card-glow-purple-gold {
+    position: relative;
+    animation: glow-purple-gold-breathe 2.5s ease-in-out infinite;
+  }
+  .card-glow-purple-gold::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    background: linear-gradient(
+      110deg,
+      rgba(168, 85, 247, 0.4) 0%,
+      rgba(255, 215, 0, 0.5) 25%,
+      rgba(255, 255, 220, 0.9) 50%,
+      rgba(255, 215, 0, 0.5) 75%,
+      rgba(168, 85, 247, 0.4) 100%
+    );
+    background-size: 250% 100%;
+    border-radius: 1rem;
+    animation: shimmer-purple-gold 3s ease-in-out infinite;
+    pointer-events: none;
+    z-index: -1;
+    filter: blur(4px);
+  }
+
+  @keyframes glow-purple-gold-breathe {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.2); }
+  }
+
+  @keyframes shimmer-purple-gold {
+    0%   { background-position: 250% 0; }
+    100% { background-position: -250% 0; }
+  }
 
   /* ============================
      毛玻璃徽章 — 用于暗色背景上的标签

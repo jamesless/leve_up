@@ -41,15 +41,24 @@ interface RoomCardProps {
 
 const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
   const playerCount = game.players?.length || 0;
-  const isHost = user && game.hostId === user.id;
-  const canJoin = !isHost && playerCount < game.maxPlayers && game.status === 'waiting';
+  const isHost = user && String(game.hostId) === String(user.id);
+  const isInRoom = user && game.players?.some((p) => String(p.id) === String(user.id));
+  const canJoin = !isHost && !isInRoom && playerCount < game.maxPlayers && game.status === 'waiting';
+  const canEnter = isInRoom && ['waiting', 'calling', 'calling_friend', 'discarding', 'playing'].includes(game.status);
 
   return (
     <Card
       className={`relative overflow-hidden transition-all duration-300 bg-white/5 border-white/30 hover:border-white/50 backdrop-blur-2xl shadow-xl hover:shadow-2xl aero-card ${
-        canJoin ? 'cursor-pointer hover:bg-white/8 group' : ''
+        (canJoin || canEnter) ? 'cursor-pointer hover:bg-white/8 group' : ''
       }`}
-      onClick={() => canJoin && onJoin(game.id)}
+      onClick={() => {
+        if (canEnter) {
+          // 进入自己所在的房间 - 直接跳转
+          window.location.href = `/game/table/${game.id}`;
+        } else if (canJoin) {
+          onJoin(game.id);
+        }
+      }}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
@@ -60,6 +69,11 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
                 <Badge variant="secondary" className="text-xs bg-gradient-to-r from-purple-500/30 to-pink-500/30 border-purple-400/40 text-purple-100">
                   <Crown className="h-3 w-3 mr-1 text-yellow-400" />
                   我的
+                </Badge>
+              )}
+              {isInRoom && !isHost && (
+                <Badge variant="secondary" className="text-xs bg-gradient-to-r from-emerald-500/30 to-teal-500/30 border-emerald-400/40 text-emerald-100">
+                  我在这里
                 </Badge>
               )}
             </CardTitle>
@@ -96,6 +110,13 @@ const RoomCard: React.FC<RoomCardProps> = ({ game, user, onJoin }) => {
       {canJoin && (
         <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
           <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-full p-2 shadow-lg shadow-purple-500/50">
+            <LogIn className="h-4 w-4 text-white" />
+          </div>
+        </div>
+      )}
+      {canEnter && (
+        <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full p-2 shadow-lg shadow-emerald-500/50">
             <LogIn className="h-4 w-4 text-white" />
           </div>
         </div>
