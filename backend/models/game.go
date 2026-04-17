@@ -102,8 +102,9 @@ type GameTable struct {
 	ThrowBlockerCard string `json:"throwBlockerCard,omitempty"` // 让甩牌失败的牌描述
 
 	// 本局结算信息（游戏结束后用于前端显示）
-	TotalPoints  int          `json:"totalPoints,omitempty"`  // 闲家（抓分方）本局总得分
-	RoundResults []GameResult `json:"roundResults,omitempty"` // 本局每个玩家的结算结果
+	TotalPoints             int          `json:"totalPoints,omitempty"`             // 闲家（抓分方）本局总得分
+	RoundResults            []GameResult `json:"roundResults,omitempty"`            // 本局每个玩家的结算结果
+	NextRoundCountdownStart string       `json:"nextRoundCountdownStart,omitempty"` // 下一局倒计时开始时间（ISO 8601，服务器同步）
 }
 
 // PreviousGameResult 记录上一局的结果，用于确定下一局的起始发牌人
@@ -1500,8 +1501,9 @@ func NextRound(gameID string) (*GameTable, error) {
 		return nil, fmt.Errorf("game is not finished, cannot start next round")
 	}
 
-	// Get the new current level from the winning team (already updated in DB by RecordGameResult)
-	// Find the max level among all players
+	// Get the new current level: use the winning team's new level (already updated in DB by RecordGameResult).
+	// Since the winning team always advances, their level is the highest among all players,
+	// so taking the max correctly reflects the next round's trump rank.
 	newLevel := "2"
 	maxLevelIndex := -1
 	levels := []string{"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
@@ -1517,6 +1519,9 @@ func NextRound(gameID string) (*GameTable, error) {
 			}
 		}
 	}
+
+	// Determine starting dealer based on previous round result
+	startingDealer := determineStartingDealer(table.PreviousResult, table.DealerSeat)
 
 	// Update game's current level in database
 	if err := UpdateGameCurrentLevel(gameID, newLevel); err != nil {
@@ -1537,9 +1542,6 @@ func NextRound(gameID string) (*GameTable, error) {
 	}
 	bottomCards := allCards[cardsToDeal : cardsToDeal+7]
 	dealingCards := allCards[0:cardsToDeal]
-
-	// Determine starting dealer based on previous round result
-	startingDealer := determineStartingDealer(table.PreviousResult, table.DealerSeat)
 
 	// Reset table for new round
 	table.Status = "dealing"
@@ -1571,6 +1573,7 @@ func NextRound(gameID string) (*GameTable, error) {
 	table.ThrowBlockerCard = ""
 	table.TotalPoints = 0
 	table.RoundResults = nil
+	table.NextRoundCountdownStart = ""
 	table.LastPlay = nil
 
 	// Reset each player's hand
@@ -2452,6 +2455,7 @@ func PlayCardsGame(gameID, userID string, cardIndices []int) (*PlayResult, error
 				// 存储结算信息到 table，供前端读取
 				table.TotalPoints = totalPoints
 				table.RoundResults = gameResults
+				table.NextRoundCountdownStart = time.Now().UTC().Format(time.RFC3339)
 				table.PreviousResult = &PreviousGameResult{
 					WinnerTeam: result.WinnerTeam,
 					DealerSeat: table.DealerSeat,
@@ -3092,12 +3096,10 @@ func getCardNumericValue(value string) int {
 }
 
 // validateFollowPlay validates following a lead
-// 跟牌优先级：
-// 1. 相同牌型、相同数量
-// 2. 相同花色的对子
-// 3. 相同花色的单张
-// 4. 主牌杀（无色时用主牌，牌型需完美匹配）
-// 5. 垫任意其他牌
+//
+// 规则：
+// 1. 有领出花色的牌：出够领出数量即可（最优组合优先：有对子出对子，有三张出三张）
+// 2. 没有领出花色：毙牌（主牌）或垫其他副牌
 func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error {
 	if len(table.CurrentTrick) == 0 {
 		return fmt.Errorf("没有领出的牌")
@@ -3108,7 +3110,7 @@ func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error 
 	leadSuit := leadPlay.Suit
 	leadSeat := table.CurrentTrick[0].Seat
 
-	// Get all cards the leader played (in case of multiple cards)
+	// Get all cards the leader played
 	leadCards := []Card{}
 	for _, pc := range table.CurrentTrick {
 		if pc.Seat == leadSeat {
@@ -3118,62 +3120,57 @@ func validateFollowPlay(cards []Card, table *GameTable, hand *PlayerHand) error 
 		}
 	}
 
-	// 分析领出的牌型
 	leadCardCount := len(leadCards)
-	leadCardType := analyzeLeadCardType(leadCards)
+	leadCardType := analyzeLeadCardType(leadCards, table.TrumpSuit, table.TrumpRank)
 
-	// 检查玩家是否有领出花色的牌
-	// 注意：级牌属于主牌，不属于其原花色
-	var leadSuitCards []Card // 玩家手中领出花色的牌（不包括级牌）
-	var trumpCards []Card    // 主牌（包括级牌）
-	var otherCards []Card    // 其他花色的牌
-
-	for _, card := range hand.Cards {
-		// 级牌是主牌
-		if card.Value == table.TrumpRank {
-			trumpCards = append(trumpCards, card)
-			continue
-		}
-		// 王也是主牌
-		if card.Value == "Joker" {
-			trumpCards = append(trumpCards, card)
-			continue
-		}
-		if card.Suit == leadSuit {
-			leadSuitCards = append(leadSuitCards, card)
-		} else {
-			otherCards = append(otherCards, card)
-		}
-	}
-
-	// 规则1：有领出花色必须跟色
-	if len(leadSuitCards) > 0 {
-		// 必须出领出花色的牌
-		for _, card := range cards {
-			if card.Value == table.TrumpRank || card.Value == "Joker" {
-				continue // 主牌可以用于毙牌
-			}
-			if card.Suit != leadSuit {
-				return fmt.Errorf("必须跟%s花色，不能出%s", leadSuit, card.Suit)
-			}
-		}
-
-		// 规则2：跟色情况下牌型必须尽可能接近
-		// 根据领出牌型验证跟随的牌
-		return validateFollowSuit(cards, leadCards, leadCardType, hand.Cards, table.TrumpSuit, table.TrumpRank)
-	}
-
-	// 规则3：没有领出花色可以毙牌或垫其他牌
-	// 只检查数量是否匹配
+	// 验证出牌数量必须与领出数量一致
 	if len(cards) != leadCardCount {
 		return fmt.Errorf("必须出%d张牌，实际出了%d张", leadCardCount, len(cards))
 	}
 
+	// 分类手牌（同花色牌、主牌/级牌、其他副牌）
+	handSuitCards := []Card{}
+	handTrumpCards := []Card{}
+	handOtherCards := []Card{}
+
+	for _, card := range hand.Cards {
+		if card.Value == table.TrumpRank || card.Value == "Joker" {
+			handTrumpCards = append(handTrumpCards, card)
+		} else if card.Suit == leadSuit {
+			handSuitCards = append(handSuitCards, card)
+		} else {
+			handOtherCards = append(handOtherCards, card)
+		}
+	}
+
+	// 分类本次出的牌
+	playedSuitCards := []Card{}
+	playedTrumpCards := []Card{}
+	playedOtherCards := []Card{}
+
+	for _, card := range cards {
+		if card.Value == table.TrumpRank || card.Value == "Joker" {
+			playedTrumpCards = append(playedTrumpCards, card)
+		} else if card.Suit == leadSuit {
+			playedSuitCards = append(playedSuitCards, card)
+		} else {
+			playedOtherCards = append(playedOtherCards, card)
+		}
+	}
+
+	// 情况1：玩家有领出花色的牌
+	if len(handSuitCards) > 0 {
+		// 验证最优组合：交给 validateFollowSuit 检查
+		return validateFollowSuit(cards, leadCards, leadCardType, hand.Cards, table.TrumpSuit, table.TrumpRank)
+	}
+
+	// 情况2：玩家没有领出花色的牌，可以毙牌或垫其他副牌
 	return nil
 }
 
 // analyzeLeadCardType 分析领出牌型
-func analyzeLeadCardType(leadCards []Card) string {
+// trumpSuit/trumpRank 传递用于正确识别拖拉机（考虑级牌跳过）
+func analyzeLeadCardType(leadCards []Card, trumpSuit, trumpRank string) string {
 	if len(leadCards) == 1 {
 		return "single"
 	}
@@ -3201,8 +3198,8 @@ func analyzeLeadCardType(leadCards []Card) string {
 		}
 	}
 
-	// 检查是否是拖拉机
-	if len(leadCards) >= 4 && isTractorWithContext(leadCards, "", "") {
+	// 检查是否是拖拉机（传递 trump 上下文以正确处理级牌跳过）
+	if len(leadCards) >= 4 && isTractorWithContext(leadCards, trumpSuit, trumpRank) {
 		return "tractor"
 	}
 
@@ -3215,102 +3212,118 @@ func analyzeLeadCardType(leadCards []Card) string {
 }
 
 // validateFollowSuit 验证有领出花色时的跟牌是否合法
+//
+// 规则（按优先级）：
+// 1. 领出三张：有三张必须跟三张；没有三张有对子必须跟对子；没有三张和对子才出散牌
+// 2. 领出对子：有对子必须跟对子；没有对子出散牌
+// 3. 领出拖拉机/甩牌（>=4张）：凑够数量即可
+// 4. 有色跟色，色绝了后可以随便出（任意牌，不一定是主牌）
 func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, handCards []Card, trumpSuit string, trumpRank string) error {
 	leadCardCount := len(leadCards)
+	leadSuit := leadCards[0].Suit
 
 	// 验证出牌数量必须与领出数量一致
 	if len(cards) != leadCardCount {
 		return fmt.Errorf("必须出%d张牌", leadCardCount)
 	}
 
-	// 禁止有领出花色的牌却出其他花色（毙牌除外）
-	leadSuit := leadCards[0].Suit
-	for _, card := range cards {
-		if card.Value == trumpRank || card.Value == "Joker" {
-			continue // 主牌可以用于毙牌
-		}
-		if card.Suit != leadSuit {
-			return fmt.Errorf("必须跟%s花色", leadSuit)
-		}
-	}
-
-	// 分析玩家出的牌型
-	playCardType := analyzeLeadCardType(cards)
-
-	// 检查玩家手中是否有更高级别的牌型必须跟牌
-	// 例如：有对子必须跟对子，有三张必须跟三张
+	// 分类手牌（同花色牌、主牌/级牌、其他副牌）
 	handSuitCards := []Card{}
-	handOtherCards := []Card{} // 包括级牌和主牌
+	handOtherCards := []Card{}
 	for _, card := range handCards {
-		if card.Value == trumpRank || card.Value == "Joker" {
+		if card.Value == trumpRank || card.Value == "Joker" || card.Suit != leadSuit {
 			handOtherCards = append(handOtherCards, card)
-		} else if card.Suit == leadSuit {
-			handSuitCards = append(handSuitCards, card)
 		} else {
-			handOtherCards = append(handOtherCards, card)
+			handSuitCards = append(handSuitCards, card)
 		}
 	}
 
-	// 分析手牌中的牌型
-	hasPair := false
+	// 分类本次出的牌
+	playedSuitCards := []Card{}
+	playedOtherCards := []Card{}
+	for _, card := range cards {
+		if card.Value == trumpRank || card.Value == "Joker" || card.Suit != leadSuit {
+			playedOtherCards = append(playedOtherCards, card)
+		} else {
+			playedSuitCards = append(playedSuitCards, card)
+		}
+	}
+
+	// 分析手牌中的牌型（只看同花色牌）
+	valueCounts := make(map[string]int)
+	for _, card := range handSuitCards {
+		valueCounts[card.Value]++
+	}
+
 	hasTriple := false
+	hasPair := false
 	hasTractor := false
-
-	if len(handSuitCards) >= 2 {
-		// 检查是否有对子
-		valueCounts := make(map[string]int)
-		for _, card := range handSuitCards {
-			valueCounts[card.Value]++
+	for _, count := range valueCounts {
+		if count >= 3 {
+			hasTriple = true
 		}
-		for _, count := range valueCounts {
-			if count >= 2 {
-				hasPair = true
-			}
-			if count >= 3 {
-				hasTriple = true
-			}
-		}
-
-		// 检查是否有拖拉机：需要检查是否存在连续的对子或三张
-		if len(handSuitCards) >= 4 {
-			hasTractor = containsTractor(handSuitCards, valueCounts, trumpSuit, trumpRank)
+		if count >= 2 {
+			hasPair = true
 		}
 	}
+	if len(handSuitCards) >= 4 {
+		hasTractor = containsTractor(handSuitCards, valueCounts, trumpSuit, trumpRank)
+	}
 
-	// 根据领出牌型验证跟随的牌
+	// 分析玩家出的牌型（传递 trump 上下文以正确识别拖拉机）
+	playCardType := analyzeLeadCardType(cards, trumpSuit, trumpRank)
+
+	// 根据领出牌型验证
 	switch leadCardType {
 	case "triple":
-		// 领出三张：有三张必须出三张
+		// 领出三张：有同花色三张必须跟三张
 		if hasTriple && playCardType != "triple" {
 			return fmt.Errorf("领出三张，必须跟三张")
 		}
-		// 有多于三张的同花色牌，也应该尽量跟三张
-		if len(handSuitCards) >= 3 && playCardType != "triple" && !hasTriple {
-			// 如果没有三张但有三张以上，检查是否可以用其他组合凑三张
-			// 简化处理：允许用对子+单张
+		// 没有三张有对子必须跟对子（凑够3张：对子+1张补牌）
+		if !hasTriple && hasPair {
+			// 检查出的牌中是否包含同花色对子（不要求整体牌型为pair，允许pair+散牌凑够3张）
+			playedSuitValueCounts := make(map[string]int)
+			for _, card := range playedSuitCards {
+				playedSuitValueCounts[card.Value]++
+			}
+			hasPlayedPair := false
+			for _, count := range playedSuitValueCounts {
+				if count >= 2 {
+					hasPlayedPair = true
+					break
+				}
+			}
+			if !hasPlayedPair {
+				return fmt.Errorf("领出三张，没有三张必须跟对子")
+			}
 		}
+		// 没有三张也没有对子：出散牌（已由数量验证覆盖）
 
 	case "pair":
-		// 领出对子：有对子必须跟对子
+		// 领出对子：有同花色对子必须跟对子
 		if hasPair && playCardType != "pair" {
 			return fmt.Errorf("领出对子，必须跟对子")
 		}
 
-	case "tractor":
-		// 领出拖拉机：有拖拉机必须跟拖拉机
-		if hasTractor && playCardType != "tractor" {
+	case "tractor", "throw":
+		// 领出拖拉机/甩牌：有拖拉机必须跟拖拉机，凑够数量即可
+		if hasTractor && playCardType != "tractor" && playCardType != "throw" {
 			return fmt.Errorf("领出拖拉机，必须跟拖拉机")
 		}
 
-	case "throw":
-		// 领出甩牌（多于3张同花色）：有足够多同花色牌应尽量跟甩牌
-		if len(handSuitCards) >= leadCardCount && playCardType != "throw" && playCardType != "tractor" {
-			return fmt.Errorf("领出甩牌，必须跟甩牌")
-		}
-
 	default:
-		// 单张或其他：只要同花色即可
+		// 单张：只要同花色即可
 	}
+
+	// 色绝了规则：有色必须全部跟出，色绝了后才可以用任意牌凑够数量
+	// 条件：出了其他牌 AND 手里的同花色牌没有全部出完
+	if len(playedOtherCards) > 0 && len(playedSuitCards) < len(handSuitCards) {
+		return fmt.Errorf("有%d张同花色必须全部跟出，不能出其他花色", len(handSuitCards))
+	}
+
+	// 色绝了后：只要凑够数量，可以用任意牌（包括任意副牌，不一定是主牌）
+	// 色绝了的条件：手里的同花色牌全部出完（playedSuitCards == handSuitCards < leadCardCount）
 
 	return nil
 }
@@ -3348,8 +3361,10 @@ func containsTractor(handSuitCards []Card, valueCounts map[string]int, trumpSuit
 	return false
 }
 
-// hasConsecutiveValues 检查给定的点数数组中是否存在连续的点数
-// 考虑级牌跳过的情况
+// hasConsecutiveValues 检查给定的点数数组是否全部连续
+// 考虑级牌跳过的情况：副牌等级连续=差1，或差2且中间是级牌
+// 例如 trumpRank=5 时，4-6-7 连续（4跳5到6，6到7差1）
+// 例如 trumpRank=5 时，4-6-8 不连续（4跳5到6，但6到8中间是7不是5）
 func hasConsecutiveValues(values []string, trumpRank string) bool {
 	if len(values) < 2 {
 		return false
@@ -3362,23 +3377,26 @@ func hasConsecutiveValues(values []string, trumpRank string) bool {
 
 	trumpRankBase := getCardNumericValue(trumpRank)
 
-	// 检查是否有连续的点数
+	// 检查每一对是否都连续（不是"任意一对"）
 	for i := 1; i < len(values); i++ {
 		prevBase := getCardNumericValue(values[i-1])
 		currBase := getCardNumericValue(values[i])
 
 		// 正常连续（差1）
 		if currBase == prevBase+1 {
-			return true
+			continue
 		}
 
 		// 跨级牌连续（差2，且级牌在中间）
 		if currBase == prevBase+2 && prevBase < trumpRankBase && currBase > trumpRankBase {
-			return true
+			continue
 		}
+
+		// 任何一对不连续 → 整体不连续
+		return false
 	}
 
-	return false
+	return true
 }
 
 // isTractor checks if the cards form a tractor (consecutive pairs or triples)
@@ -4009,7 +4027,9 @@ func CheckAndProcessCountdown(gameID string) (*GameTable, error) {
 		})
 
 		// 确定庄家后，进入叫朋友和扣底牌阶段
-		return finalizeDealerAndStartPlaying(table)
+		table, _ = finalizeDealerAndStartPlaying(table)
+		activeGames[gameID] = table
+		return table, nil
 	}
 
 	// 情况2：无人叫庄，进入翻底牌阶段
@@ -4030,6 +4050,7 @@ func CheckAndProcessCountdown(gameID string) (*GameTable, error) {
 	})
 
 	table.UpdatedAt = time.Now()
+	activeGames[gameID] = table
 	return table, nil
 }
 

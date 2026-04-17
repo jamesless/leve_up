@@ -6,6 +6,7 @@ interface IPlayerSeatProps {
   player?: IPlayer;
   isCurrentTurn?: boolean;
   isDealer?: boolean;
+  isThrowBlocker?: boolean; // 是否是让甩牌失败的玩家（高亮显示）
   position?: 'top' | 'left' | 'right' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
   score?: number; // 当前得分
   friendRevealed?: boolean;
@@ -51,6 +52,7 @@ export default function PlayerSeat({
   player,
   isCurrentTurn = false,
   isDealer = false,
+  isThrowBlocker = false,
   position,
   score = 0,
   friendRevealed,
@@ -82,15 +84,26 @@ export default function PlayerSeat({
               animation: 'seat-glow 2s ease-in-out infinite',
             }} />
         )}
+        {/* 甩牌失败高亮光晕（红色） */}
+        {isThrowBlocker && (
+          <div className="absolute inset-0 rounded-full animate-pulse"
+            style={{
+              background: 'radial-gradient(circle, rgba(239,68,68,0.6) 0%, transparent 70%)',
+              filter: 'blur(8px)',
+              animation: 'seat-glow 2s ease-in-out infinite',
+            }} />
+        )}
         <div
           className={cn(
             'relative flex items-center justify-center rounded-full border-2 transition-all backdrop-blur-md',
             // 移动端更小头像
             'h-9 w-9 sm:h-11 sm:w-11 md:h-13 md:w-13',
             player
-              ? isCurrentTurn
-                ? 'border-purple-400 bg-purple-500/25 shadow-lg shadow-purple-500/30'
-                : 'border-white/30 bg-white/10'
+              ? isThrowBlocker
+                ? 'border-red-500 bg-red-500/30 shadow-lg shadow-red-500/40'
+                : isCurrentTurn
+                  ? 'border-purple-400 bg-purple-500/25 shadow-lg shadow-purple-500/30'
+                  : 'border-white/30 bg-white/10'
               : 'border-dashed border-white/20 bg-white/5',
           )}
         >

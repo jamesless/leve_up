@@ -106,7 +106,7 @@ const game = data?.game;
     const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true); // 右侧栏是否展开
     const [showLastTrick, setShowLastTrick] = useState(false); // 是否显示上一轮出牌
 
-    // 计算当前轮中谁最大
+    // 计算当前轮中谁最大（平牌时先出的大）
     const getCurrentWinner = () => {
         if (!game?.currentTrick || game.currentTrick.length === 0) return null;
         if (!game.trumpSuit || !game.trumpRank) return null;
@@ -114,14 +114,15 @@ const game = data?.game;
         let winner = game.currentTrick[0];
 
         for (const played of game.currentTrick) {
-            if (compareCards(played.cards[0], winner.cards[0], game.trumpSuit, game.trumpRank) > 0) {
+            const cmp = compareCards(played.cards[0], winner.cards[0], game.trumpSuit, game.trumpRank);
+            if (cmp > 0 || (cmp === 0 && game.currentTrick.indexOf(played) < game.currentTrick.indexOf(winner))) {
                 winner = played;
             }
         }
         return winner;
     };
 
-    // 计算上一轮中谁最大
+    // 计算上一轮中谁最大（平牌时先出的大）
     const getLastTrickWinner = () => {
         if (!game?.lastCompletedTrick || game.lastCompletedTrick.length === 0) return null;
         if (!game.trumpSuit || !game.trumpRank) return null;
@@ -129,7 +130,8 @@ const game = data?.game;
         let winner = game.lastCompletedTrick[0];
 
         for (const played of game.lastCompletedTrick) {
-            if (compareCards(played.cards[0], winner.cards[0], game.trumpSuit, game.trumpRank) > 0) {
+            const cmp = compareCards(played.cards[0], winner.cards[0], game.trumpSuit, game.trumpRank);
+            if (cmp > 0 || (cmp === 0 && game.lastCompletedTrick.indexOf(played) < game.lastCompletedTrick.indexOf(winner))) {
                 winner = played;
             }
         }
@@ -445,16 +447,18 @@ const game = data?.game;
                             const isSoloMode = game.friendRevealed && game.friendSeat === game.dealerSeat; // 1打4独打模式
                             const biggestCard = getCurrentWinner();
                             const isBiggest = biggestCard && biggestCard.playerId === player.id; // 当前轮最大牌
+                            const isThrowBlocker = game.throwBlocker === player.position; // 甩牌失败高亮
                             const score = game.scores?.[player.id] || 0;
                             return (
-                                <div key={player.id} className={cn('rounded-lg p-1.5 transition-all border relative', isCurrentTurn ? 'bg-purple-500/20 border-purple-400/50' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent')}>
+                                <div key={player.id} className={cn('rounded-lg p-1.5 transition-all border relative', isThrowBlocker ? 'bg-red-500/20 border-red-500/60 ring-1 ring-red-500/40' : isCurrentTurn ? 'bg-purple-500/20 border-purple-400/50' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent')}>
                                     {isOnFire && <div className={isSoloMode ? 'fire-particles-blue' : 'fire-particles'} />}
                                     {isBiggest && game.currentTrick.length > 0 && (
                                         <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full animate-pulse z-20" />
                                     )}
-                                    <div className={cn('relative flex items-center justify-center rounded-full border mx-auto mb-1 h-8 w-8', isCurrentTurn ? 'border-purple-400 bg-purple-500/25' : 'border-white/30 bg-white/10', isOnFire && 'z-10')}>
+                                    <div className={cn('relative flex items-center justify-center rounded-full border mx-auto mb-1 h-8 w-8', isThrowBlocker ? 'border-red-500 bg-red-500/30' : isCurrentTurn ? 'border-purple-400 bg-purple-500/25' : 'border-white/30 bg-white/10', isOnFire && 'z-10')}>
                                         {player.isAI ? <span className="text-xs z-10">🤖</span> : <User className="h-4 w-4 text-white/70 z-10" />}
-                                        {isCurrentTurn && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-purple-400/50" />}
+                                        {isThrowBlocker && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-red-500/50" />}
+                                        {isCurrentTurn && !isThrowBlocker && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-purple-400/50" />}
                                     </div>
                                     <div className="text-center mb-0.5">
                                         <span className={cn('text-xs font-medium block truncate', isMe ? 'text-amber-300' : 'text-white/90')}>{player.username}</span>
@@ -485,6 +489,12 @@ const game = data?.game;
                                     </div>
                                 );
                             })()}
+                            {/* 甩牌失败消息 */}
+                            {game.throwBlockerCard && (
+                                <div className="mt-1 p-1.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[9px] text-center animate-pulse">
+                                    ⚠ {game.throwBlockerCard}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -578,13 +588,14 @@ const game = data?.game;
                                 const isSoloMode = game.friendRevealed && game.friendSeat === game.dealerSeat;
                                 const biggestCard = getCurrentWinner();
                                 const isBiggest = biggestCard && biggestCard.playerId === player.id;
+                                const isThrowBlocker = game.throwBlocker === player.position;
                                 return (
-                                    <div key={player.id} className={cn('flex-shrink-0 flex items-center gap-1 rounded-full px-2 py-0.5 border text-[9px] relative', isCurrentTurn ? 'bg-purple-500/30 border-purple-400/60' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-1 ring-yellow-400')}>
+                                    <div key={player.id} className={cn('flex-shrink-0 flex items-center gap-1 rounded-full px-2 py-0.5 border text-[9px] relative', isThrowBlocker ? 'bg-red-500/30 border-red-500/60 ring-1 ring-red-400/50' : isCurrentTurn ? 'bg-purple-500/30 border-purple-400/60' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-1 ring-yellow-400')}>
                                         {isOnFire && <div className={isSoloMode ? 'fire-particles-blue' : 'fire-particles'} />}
                                         {isBiggest && game.currentTrick.length > 0 && (
                                             <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
                                         )}
-                                        <span className={isCurrentTurn ? 'text-purple-300' : ''}>{isCurrentTurn ? '▶' : ''}</span>
+                                        <span className={isThrowBlocker ? 'text-red-300' : isCurrentTurn ? 'text-purple-300' : ''}>{isThrowBlocker ? '⚠' : isCurrentTurn ? '▶' : ''}</span>
                                         <span className={isMe ? 'text-amber-300 font-medium' : 'text-white/80'}>{player.username.substring(0,3)}</span>
                                         {isDealer && <span className="text-amber-400">庄</span>}
                                         {player.isAI && <span className="text-blue-400">AI</span>}

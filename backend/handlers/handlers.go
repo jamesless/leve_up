@@ -1012,12 +1012,37 @@ func GetGameTableHandler(c *gin.Context) {
 		}
 	}
 
-	currentTrick := make([]map[string]interface{}, 0, len(table.CurrentTrick))
-	for _, trick := range table.CurrentTrick {
-		currentTrick = append(currentTrick, map[string]interface{}{
-			"playerId": trick.Seat,
-			"cards":    []models.Card{trick.Card},
-		})
+	// 转换 currentTrick：将同一玩家连续出的牌合并为一个 entry，并正确设置 isLead
+	currentTrick := make([]map[string]interface{}, 0)
+	if len(table.CurrentTrick) > 0 {
+		// 找出第一张有 IsLead=true 的 entry index（领牌玩家的起始位置）
+		leadStart := -1
+		for i, trick := range table.CurrentTrick {
+			if trick.IsLead {
+				leadStart = i
+				break
+			}
+		}
+		// 按玩家分组：同一个玩家的连续 entries 合并
+		groups := []map[string]interface{}{}
+		i := 0
+		for i < len(table.CurrentTrick) {
+			seat := table.CurrentTrick[i].Seat
+			cards := []models.Card{}
+			for i < len(table.CurrentTrick) && table.CurrentTrick[i].Seat == seat {
+				cards = append(cards, table.CurrentTrick[i].Card)
+				i++
+			}
+			groups = append(groups, map[string]interface{}{
+				"playerId": seat,
+				"cards":    cards,
+			})
+		}
+		// 标记领牌者（leadStart 位置）
+		if leadStart >= 0 && leadStart < len(groups) {
+			groups[leadStart]["isLead"] = true
+		}
+		currentTrick = groups
 	}
 
 	// 转换上一轮完成的出牌记录
@@ -1065,9 +1090,13 @@ func GetGameTableHandler(c *gin.Context) {
 		"hostCalledCard":     table.HostCalledCard,
 		"friendRevealed":     table.FriendRevealed,
 		"friendSeat":         table.FriendSeat,
+		// 甩牌失败高亮显示
+		"throwBlocker":     table.ThrowBlocker,
+		"throwBlockerCard": table.ThrowBlockerCard,
 		// 本局结算信息
-		"totalPoints":  table.TotalPoints,
-		"roundResults": table.RoundResults,
+		"totalPoints":             table.TotalPoints,
+		"roundResults":            table.RoundResults,
+		"nextRoundCountdownStart": table.NextRoundCountdownStart,
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -72,6 +72,10 @@ export interface IGameState {
   totalPoints?: number;   // 抓分方总得分
   roundResults?: IGameRoundResult[]; // 每个玩家的结算结果
   lastPlay?: ILastPlay;  // 最后一手牌结果（含结算信息）
+  nextRoundCountdownStart?: string; // 下一局倒计时开始时间（ISO字符串，服务器同步）
+  // 甩牌失败高亮显示
+  throwBlocker?: number;    // 让甩牌失败的玩家座位号（用于高亮显示）
+  throwBlockerCard?: string; // 让甩牌失败的牌描述
 }
 
 export interface IGameRoundResult {
