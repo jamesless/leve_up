@@ -1,14 +1,14 @@
-import { useParams, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Loader2, ArrowLeft, Play, Film, User } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, Film, User, Menu, X, LogOut } from 'lucide-react';
 import { isJoker, getJokerImageUrl } from '@/lib/card';
+import PlayingCard from '@/components/game/PlayingCard';
 import { Button } from '@/components/ui/button';
 import PlayerHand from '@/components/game/PlayerHand';
 import FinishedPanel from '@/components/game/FinishedPanel';
 import CallDealerDialog from '@/components/game/CallDealerDialog';
 import DiscardDialog from '@/components/game/DiscardDialog';
 import CallFriendDialog from '@/components/game/CallFriendDialog';
-import { PLAYER_COLORS } from '@/config/playerColors';
 import {
     useGameTable,
     usePlayCards,
@@ -27,8 +27,10 @@ import {
 } from '@/hooks/useGame';
 import { useGameStore } from '@/store/gameStore';
 import { useAuthStore } from '@/store/authStore';
+import { useLogout } from '@/hooks/useAuth';
 import { EGameStatus, ECardSuit, ICard } from '@/types';
 import { useEffect, useRef, useState} from 'react';
+import { createPortal } from 'react-dom';
 
 // 花色符号映射
 const SUIT_SYMBOLS: Record<string, string> = {
@@ -45,13 +47,6 @@ const getSuitClass = (suit: string): string => {
     if (suit === 'clubs' || suit === 'spades') return 'text-slate-200';
     if (suit === 'joker') return 'text-purple-400';
     return 'text-slate-200';
-};
-
-// 获取花色颜色类名（用于背景）
-const getSuitBgClass = (suit: string): string => {
-    if (suit === 'hearts' || suit === 'diamonds') return 'bg-red-500/20 border-red-400/40';
-    if (suit === 'clubs' || suit === 'spades') return 'bg-slate-600/30 border-slate-400/40';
-    return 'bg-white/10 border-white/20';
 };
 
 export default function GameTable() {
@@ -79,7 +74,6 @@ export default function GameTable() {
     const dealNextCardMutation = useDealNextCard(gameId);
     const nextRoundMutation = useNextRound(gameId);
     const dealingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const hasTriggeredAutoStartRef = useRef(false);
     const hasAttemptedJoinRef = useRef(false);
     const lastAITurnRef = useRef<number | null>(null);
 const game = data?.game;
@@ -99,12 +93,65 @@ const game = data?.game;
         }
     }, [game]);
 
-    const [showCallDialog, setShowCallDialog] = useState(false);
+    // 翻底牌定庄完成后无需独立公告：级牌与底牌已合并到"扣底牌"对话框内统一展示。
+
+    // 翻牌动画保留期：每当 flippedBottomCards 数量发生变化（即新翻开一张），
+    // 把"翻牌画面允许显示到何时"延后到 now + (1.5s 翻牌 + 0.5s 停顿) = 2s。
+    // 即使后端因定庄已切到 finished / discarding，前端也会继续渲染翻牌画面直到该时间点，
+    // 确保任何一张触发定庄的牌都能完整播放翻牌动画。
+    const [flipHoldUntil, setFlipHoldUntil] = useState<number>(0);
+    const [nowTick, setNowTick] = useState<number>(() => Date.now());
+    const lastFlippedCountRef = useRef<number>(0);
+
     const [showDiscardDialog, setShowDiscardDialog] = useState(false);
     const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
-    const [callFriendMinimized, setCallFriendMinimized] = useState(false); // 叫朋友对话框是否被最小化
-    const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true); // 右侧栏是否展开
     const [showLastTrick, setShowLastTrick] = useState(false); // 是否显示上一轮出牌
+    const [topMenuOpen, setTopMenuOpen] = useState(false); // 顶部三横杠菜单是否展开
+
+    // 本地平滑倒计时：服务器只每隔几秒推送，前端本地按秒递减，避免显示卡顿
+    const [localCountdown, setLocalCountdown] = useState<number | null>(null);
+    useEffect(() => {
+        if (game?.callPhase === 'counting' && typeof game.callCountdown === 'number') {
+            setLocalCountdown(game.callCountdown);
+        } else {
+            setLocalCountdown(null);
+        }
+    }, [game?.callPhase, game?.callCountdown]);
+    useEffect(() => {
+        if (localCountdown == null || localCountdown <= 0) return;
+        const t = setTimeout(() => {
+            setLocalCountdown((c) => (c == null ? null : Math.max(0, c - 1)));
+        }, 1000);
+        return () => clearTimeout(t);
+    }, [localCountdown]);
+
+    // 监听翻牌数量变化：每当新翻开一张牌，把保留截止时间设置为 now + 2s
+    // （1.5s 翻牌动画 + 0.5s 停顿，确保动画播放完整）。
+    useEffect(() => {
+        const count = game?.flippedBottomCards?.length ?? 0;
+        if (count > lastFlippedCountRef.current) {
+            lastFlippedCountRef.current = count;
+            setFlipHoldUntil(Date.now() + 2000);
+        }
+        // 当 status 退出 CALLING（例如重开一局回到 WAITING/DEALING），重置计数
+        if (game?.status !== EGameStatus.CALLING) {
+            lastFlippedCountRef.current = count;
+        }
+    }, [game?.flippedBottomCards?.length, game?.status]);
+
+    // 保留期内每 100ms 推进 nowTick，使 nowTick < flipHoldUntil 的判断能及时重渲染
+    useEffect(() => {
+        if (nowTick >= flipHoldUntil) return;
+        const t = setTimeout(() => setNowTick(Date.now()), 100);
+        return () => clearTimeout(t);
+    }, [nowTick, flipHoldUntil]);
+
+    const logoutMutation = useLogout();
+    const seatRefs = useRef<Record<number, HTMLDivElement | null>>({}); // 玩家头像 DOM 引用（座位 -> 元素）
+    const tableSurfaceRef = useRef<HTMLDivElement | null>(null); // 桌布 DOM 引用
+    const cardMatRef = useRef<HTMLDivElement | null>(null); // 牌垫区域（飞牌 overlay 的父级）DOM 引用
+    const [cardMatEl, setCardMatEl] = useState<HTMLDivElement | null>(null); // 用于触发 portal 在 ref 挂载后重渲染
+    const [seatTargets, setSeatTargets] = useState<Record<number, { x: number; y: number }>>({});
 
     // 计算当前轮中谁最大（平牌时先出的大）
     const getCurrentWinner = () => {
@@ -123,20 +170,7 @@ const game = data?.game;
     };
 
     // 计算上一轮中谁最大（平牌时先出的大）
-    const getLastTrickWinner = () => {
-        if (!game?.lastCompletedTrick || game.lastCompletedTrick.length === 0) return null;
-        if (!game.trumpSuit || !game.trumpRank) return null;
-
-        let winner = game.lastCompletedTrick[0];
-
-        for (const played of game.lastCompletedTrick) {
-            const cmp = compareCards(played.cards[0], winner.cards[0], game.trumpSuit, game.trumpRank);
-            if (cmp > 0 || (cmp === 0 && game.lastCompletedTrick.indexOf(played) < game.lastCompletedTrick.indexOf(winner))) {
-                winner = played;
-            }
-        }
-        return winner;
-    };
+    // const getLastTrickWinner = () => { ... } // 暂未使用，保留 showLastTrick 直接展示牌
 
     // 比较两张牌的大小，返回 1: a大, -1: b大, 0: 相等
     const compareCards = (a: ICard, b: ICard, trumpSuit: string, trumpRank: string): number => {
@@ -182,13 +216,8 @@ const game = data?.game;
         return strength;
     };
 
-    useEffect(() => {
-        if (!isSinglePlayerRoute || hasTriggeredAutoStartRef.current) return;
-        if (!game) return;
-        if (game.status !== EGameStatus.WAITING) return;
-        hasTriggeredAutoStartRef.current = true;
-        startSinglePlayerMutation.mutate();
-    }, [game?.status, game?.id, isSinglePlayerRoute, startSinglePlayerMutation.mutate]);
+    // 单人模式不再自动开局；改为在 WAITING 阶段显示"开始游戏"按钮，由玩家手动触发。
+    // 这里只保留路由信息和 mutation 供按钮使用。
 
     // 跟踪上一轮完成出牌
     const prevTrickCountRef = useRef(0);
@@ -202,22 +231,13 @@ const game = data?.game;
         prevTrickCountRef.current = currentCount;
     }, [game?.currentTrick?.length]);
 
-    // 自动显示叫庄或扣牌或叫朋友对话框
+    // 自动显示扣牌或叫朋友对话框
+    // 注意：亮庄面板已直接内嵌渲染在桌布下方（见 JSX），不再依赖 showCallDialog
     useEffect(() => {
         if (!game) return;
-        if (game.status === EGameStatus.CALLING) {
-            // 检查玩家是否已经叫过庄或选择不叫
-            const mySeat = game.myPosition;
-            const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
-            const hasPassed = game.passedSeats?.includes(mySeat);
-            const isFinished = game.callPhase === 'finished';
-            // 只有在玩家还没有做出选择且阶段未结束时才显示对话框
-            if (!hasCalled && !hasPassed && !isFinished) {
-                setShowCallDialog(true);
-            } else {
-                setShowCallDialog(false);
-            }
-        } else if (game.status === EGameStatus.DISCARDING) {
+        // 翻牌动画保留期内不抢先弹出扣底牌对话框，等动画播放完整后下一次渲染再开
+        const inFlipHold = Date.now() < flipHoldUntil;
+        if (game.status === EGameStatus.DISCARDING && !inFlipHold) {
             // 只有庄家才能扣牌
             if (game.dealerSeat === game.myPosition) {
                 setShowDiscardDialog(true);
@@ -228,16 +248,14 @@ const game = data?.game;
             // 只有庄家才会自动弹出叫朋友对话框
             if (game.dealerSeat === game.myPosition) {
                 setShowCallFriendDialog(true);
-                setCallFriendMinimized(false); // 重置最小化状态
             } else {
                 setShowCallFriendDialog(false);
             }
         } else {
-            setShowCallDialog(false);
             setShowDiscardDialog(false);
             setShowCallFriendDialog(false);
         }
-    }, [game?.status, game?.callRecords, game?.passedSeats, game?.callPhase, game?.myPosition]);
+    }, [game?.status, game?.dealerSeat, game?.myPosition, flipHoldUntil, nowTick]);
 
     // 自动加入游戏（如果尚未加入）
     useEffect(() => {
@@ -283,11 +301,12 @@ const game = data?.game;
 
     // 注意：自动开始游戏的逻辑已移至后端，当5人全部准备后自动触发
 
-    // 发牌轮询逻辑
+    // 发牌轮询逻辑：每 1 秒请求一次后端发"下一张"牌（按规则逆时针发）
+    // 单人 / 多人模式下后端都会进入 DEALING 阶段，前端按 1 秒 / 张轮询，
+    // 把每一张飞向对应座位
     useEffect(() => {
         if (!game) return;
         if (game.status !== EGameStatus.DEALING) {
-            // 清理轮询
             if (dealingIntervalRef.current) {
                 clearInterval(dealingIntervalRef.current);
                 dealingIntervalRef.current = null;
@@ -295,7 +314,6 @@ const game = data?.game;
             return;
         }
 
-        // 每200ms请求发下一轮牌
         if (!dealingIntervalRef.current && !dealNextCardMutation.isPending) {
             dealingIntervalRef.current = setInterval(() => {
                 if (!dealNextCardMutation.isPending) {
@@ -311,6 +329,92 @@ const game = data?.game;
             }
         };
     }, [game?.status, dealNextCardMutation.isPending]);
+
+    // 发牌动画：每发出一张牌（dealtCardCount 增加）就触发一次飞牌动画
+    const [dealAnimKey, setDealAnimKey] = useState(0);
+    const lastDealtCountRef = useRef<number>(0);
+    useEffect(() => {
+        if (!game) return;
+        if (game.status !== EGameStatus.DEALING) {
+            lastDealtCountRef.current = 0;
+            return;
+        }
+        const count = game.dealtCardCount ?? 0;
+        if (count !== lastDealtCountRef.current) {
+            lastDealtCountRef.current = count;
+            setDealAnimKey((k) => k + 1);
+        }
+    }, [game?.dealtCardCount, game?.status]);
+
+    // 实时测量每个座位头像中心相对于"牌垫区域"中心的像素偏移，
+    // 用作发牌动画飞向的目标。布局变化（窗口缩放、玩家入座、字号变化等）时自动重算。
+    useEffect(() => {
+        const mat = cardMatRef.current;
+        if (!mat) return;
+        const recompute = () => {
+            const matRect = mat.getBoundingClientRect();
+            if (matRect.width === 0 || matRect.height === 0) return;
+            const matCx = matRect.left + matRect.width / 2;
+            const matCy = matRect.top + matRect.height / 2;
+            const next: Record<number, { x: number; y: number }> = {};
+            for (const seat of [1, 2, 3, 4, 5]) {
+                const el = seatRefs.current[seat];
+                if (!el) continue;
+                const r = el.getBoundingClientRect();
+                next[seat] = {
+                    x: r.left + r.width / 2 - matCx,
+                    y: r.top + r.height / 2 - matCy,
+                };
+            }
+            setSeatTargets(prev => {
+                // 浅比较，避免无意义的 setState
+                const keys = Object.keys(next);
+                if (keys.length === Object.keys(prev).length &&
+                    keys.every(k => prev[+k] && Math.abs(prev[+k].x - next[+k].x) < 0.5 && Math.abs(prev[+k].y - next[+k].y) < 0.5)) {
+                    return prev;
+                }
+                return next;
+            });
+        };
+        recompute();
+        const ro = new ResizeObserver(recompute);
+        ro.observe(mat);
+        const surface = tableSurfaceRef.current;
+        if (surface) ro.observe(surface);
+        for (const seat of [1, 2, 3, 4, 5]) {
+            const el = seatRefs.current[seat];
+            if (el) ro.observe(el);
+        }
+        window.addEventListener('resize', recompute);
+        window.addEventListener('scroll', recompute, true);
+        return () => {
+            ro.disconnect();
+            window.removeEventListener('resize', recompute);
+            window.removeEventListener('scroll', recompute, true);
+        };
+    }, [players.length, game?.status]);
+
+    const showDealAnim = game?.status === EGameStatus.DEALING;
+    // 把当前一张牌飞向后端告知的座位（lastDealtSeat），fallback 到座位 1
+    const flyingSeat = game?.lastDealtSeat && game.lastDealtSeat >= 1 && game.lastDealtSeat <= 5
+        ? game.lastDealtSeat
+        : 1;
+    const totalCardsPerPlayer = game?.totalCardsPerPlayer ?? 31;
+    const dealtCount = game?.dealtCardCount ?? 0;
+    // 第几轮（1..31）= ceil(dealtCount / 5)
+    const dealtRound = dealtCount === 0 ? 1 : Math.min(totalCardsPerPlayer, Math.ceil(dealtCount / 5));
+    // 飞牌目标偏移：优先用实时测量的像素偏移；测量未就绪时退回到静态比例兜底
+    const FALLBACK_SEAT_OFFSETS: Record<number, { x: string; y: string }> = {
+        1: { x: '-40%', y: '-40%' },
+        2: { x: '-40%', y: '-20%' },
+        3: { x: '-40%', y: '0%'   },
+        4: { x: '-40%', y: '20%'  },
+        5: { x: '-40%', y: '40%'  },
+    };
+    const measured = seatTargets[flyingSeat];
+    const flyOffset = measured
+        ? { x: `${Math.round(measured.x)}px`, y: `${Math.round(measured.y)}px` }
+        : (FALLBACK_SEAT_OFFSETS[flyingSeat] ?? FALLBACK_SEAT_OFFSETS[1]);
 
     if (!isAuthenticated) return <Navigate to="/login" replace />;
     if (!gameId) return <Navigate to="/game" replace />;
@@ -348,7 +452,6 @@ const game = data?.game;
             { cardIndices },
             { onSuccess: () => {
                     clearSelection();
-                    setShowCallDialog(false);
                 }},
         );
     };
@@ -373,7 +476,7 @@ const game = data?.game;
     };
 
     return (
-        <div className="flex min-h-[calc(100vh-4rem)] flex-col">
+        <div className="flex h-screen flex-col">
             {/* 结算面板（游戏结束时显示） */}
             {game.status === EGameStatus.FINISHED && (
                 <FinishedPanel
@@ -383,23 +486,14 @@ const game = data?.game;
                     isNextRoundPending={nextRoundMutation.isPending}
                 />
             )}
-            <div className="flex flex-wrap items-center justify-between border-b border-white/10 px-2 sm:px-4 py-1.5 sm:py-2 gap-1 bg-black/20 backdrop-blur-sm">
-                <Button variant="ghost" size="sm" className="gap-1 text-white/80 hover:text-white hover:bg-white/10" onClick={() => navigate('/game')}>
+            <div className="relative flex items-center justify-between border-b border-white/10 px-2 py-1 bg-black/30 backdrop-blur-sm flex-shrink-0">
+                <Button variant="ghost" size="sm" className="h-7 px-2 gap-1 text-white/80 hover:text-white hover:bg-white/10" onClick={() => navigate('/game')}>
                     <ArrowLeft className="h-4 w-4" />
-                    <span className="hidden sm:inline">返回</span>
+                    <span className="hidden sm:inline text-xs">返回</span>
                 </Button>
-                <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1 hidden sm:flex glass border-white/20 text-white/80 hover:bg-white/10 hover:text-white"
-                        onClick={() => navigate(`/game/replay/${gameId}`)}
-                    >
-                        <Film className="h-4 w-4" />
-                        回放
-                    </Button>
+                <div className="flex items-center gap-1">
                     <span className={cn(
-                        "status-badge-glass rounded-full px-2.5 py-0.5 text-[10px] sm:text-xs",
+                        "status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs",
                         game.status === EGameStatus.PLAYING ? 'border-emerald-400/40 text-emerald-300' :
                         game.status === EGameStatus.WAITING ? 'border-white/30 text-white/70' :
                         'border-purple-400/40 text-purple-200'
@@ -409,7 +503,9 @@ const game = data?.game;
                             : game.status === EGameStatus.DEALING
                                 ? '发牌中'
                                 : game.status === EGameStatus.CALLING
-                                    ? `叫庄${game.callCountdown ? ` (${game.callCountdown}s)` : ''}`
+                                    ? (game.callPhase === 'flipping'
+                                        ? '翻底定庄'
+                                        : `亮庄${game.callCountdown ? ` (${game.callCountdown}s)` : ''}`)
                                     : game.status === EGameStatus.CALLING_FRIEND
                                         ? '叫朋友'
                                         : game.status === EGameStatus.DISCARDING
@@ -419,361 +515,456 @@ const game = data?.game;
                                                 : '已结束'}
                     </span>
                     {game.currentLevel && (
-                        <span className="status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs border-amber-400/40 text-amber-300 hidden sm:inline-flex gap-1">
+                        <span className="status-badge-glass rounded-full px-1.5 py-0.5 text-[10px] sm:text-xs border-amber-400/40 text-amber-300 inline-flex gap-1">
                             <span className="opacity-60">级</span>
                             <span className="font-bold">{game.currentLevel}</span>
                         </span>
                     )}
-                    {game.hostCalledCard && (
-                        <span className="status-badge-glass rounded-full px-2 py-0.5 text-[10px] sm:text-xs border-primary/50 text-primary-foreground hidden md:inline-flex gap-1">
-                            <span>友</span>
-                            <span className="font-bold">{SUIT_SYMBOLS[game.hostCalledCard.suit]}{game.hostCalledCard.value}</span>
-                            <span className="opacity-60">(第{game.hostCalledCard.position}张)</span>
-                        </span>
-                    )}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/10"
+                        onClick={() => setTopMenuOpen(o => !o)}
+                        aria-label="菜单"
+                    >
+                        {topMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+                    </Button>
                 </div>
+                {topMenuOpen && (
+                    <>
+                        <div
+                            className="fixed inset-0 z-40 bg-black/30"
+                            onClick={() => setTopMenuOpen(false)}
+                        />
+                        <div className="absolute right-2 top-full mt-1 z-50 w-44 rounded-lg border border-white/15 bg-black/85 backdrop-blur-xl shadow-2xl py-1 animate-fade-in">
+                            <Link
+                                to="/"
+                                onClick={() => setTopMenuOpen(false)}
+                                className="block px-3 py-2 text-xs text-white/80 hover:bg-white/10"
+                            >首页</Link>
+                            <Link
+                                to="/game"
+                                onClick={() => setTopMenuOpen(false)}
+                                className="block px-3 py-2 text-xs text-white/80 hover:bg-white/10"
+                            >游戏大厅</Link>
+                            <Link
+                                to="/rules"
+                                onClick={() => setTopMenuOpen(false)}
+                                className="block px-3 py-2 text-xs text-white/80 hover:bg-white/10"
+                            >游戏规则</Link>
+                            <button
+                                onClick={() => {
+                                    setTopMenuOpen(false);
+                                    navigate(`/game/replay/${gameId}`);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/10 flex items-center gap-2"
+                            ><Film className="h-3 w-3" />回放</button>
+                            <div className="my-1 h-px bg-white/10" />
+                            {isAuthenticated && user ? (
+                                <button
+                                    onClick={() => {
+                                        setTopMenuOpen(false);
+                                        logoutMutation.mutate();
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs text-white/80 hover:bg-white/10 flex items-center gap-2"
+                                >
+                                    <LogOut className="h-3 w-3" />退出 ({user.username})
+                                </button>
+                            ) : (
+                                <>
+                                    <Link
+                                        to="/login"
+                                        onClick={() => setTopMenuOpen(false)}
+                                        className="block px-3 py-2 text-xs text-white/80 hover:bg-white/10"
+                                    >登录</Link>
+                                    <Link
+                                        to="/register"
+                                        onClick={() => setTopMenuOpen(false)}
+                                        className="block px-3 py-2 text-xs text-white/80 hover:bg-white/10"
+                                    >注册</Link>
+                                </>
+                            )}
+                        </div>
+                    </>
+                )}
             </div>
 
 {/* 主体区域 */}
-            <div className="flex flex-1 overflow-hidden flex-col sm:flex-row">
-                {/* ====== PC端左侧玩家列表（手机端隐藏）====== */}
-                <div className="hidden sm:flex border-r border-white/10 bg-black/20 backdrop-blur-sm flex-col w-24 md:w-28">
-                    <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
-                        {players.map((player) => {
-                            const isMe = player.id === Number(user?.id);
-                            const isCurrentTurn = game.currentPlayer === player.position;
-                            const isDealer = dealerTeam.includes(player.id);
-                            const isOnFire = game.friendRevealed && (isDealer || player.position === game.friendSeat); // 确认朋友后才着火
-                            const isSoloMode = game.friendRevealed && game.friendSeat === game.dealerSeat; // 1打4独打模式
-                            const biggestCard = getCurrentWinner();
-                            const isBiggest = biggestCard && biggestCard.playerId === player.id; // 当前轮最大牌
-                            const isThrowBlocker = game.throwBlocker === player.position; // 甩牌失败高亮
-                            const score = game.scores?.[player.id] || 0;
-                            return (
-                                <div key={player.id} className={cn('rounded-lg p-1.5 transition-all border relative', isThrowBlocker ? 'bg-red-500/20 border-red-500/60 ring-1 ring-red-500/40' : isCurrentTurn ? 'bg-purple-500/20 border-purple-400/50' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-2 ring-yellow-400 ring-offset-1 ring-offset-transparent')}>
-                                    {isOnFire && <div className={isSoloMode ? 'fire-particles-blue' : 'fire-particles'} />}
-                                    {isBiggest && game.currentTrick.length > 0 && (
-                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full animate-pulse z-20" />
-                                    )}
-                                    <div className={cn('relative flex items-center justify-center rounded-full border mx-auto mb-1 h-8 w-8', isThrowBlocker ? 'border-red-500 bg-red-500/30' : isCurrentTurn ? 'border-purple-400 bg-purple-500/25' : 'border-white/30 bg-white/10', isOnFire && 'z-10')}>
-                                        {player.isAI ? <span className="text-xs z-10">🤖</span> : <User className="h-4 w-4 text-white/70 z-10" />}
-                                        {isThrowBlocker && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-red-500/50" />}
-                                        {isCurrentTurn && !isThrowBlocker && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-purple-400/50" />}
-                                    </div>
-                                    <div className="text-center mb-0.5">
-                                        <span className={cn('text-xs font-medium block truncate', isMe ? 'text-amber-300' : 'text-white/90')}>{player.username}</span>
-                                        {isMe && <span className="text-[8px] text-amber-400/70">(我)</span>}
-                                    </div>
-                                    <div className="flex flex-wrap justify-center gap-0.5 mb-1">
-                                        {isDealer && <span className="text-[7px] px-1 py-0 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300">庄</span>}
-                                        {player.isAI && <span className="text-[7px] px-1 py-0 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-300">AI</span>}
-                                        {player.isFriend && <span className="text-[7px] px-1 py-0 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300">友</span>}
-                                        {isSoloMode && game.dealerSeat === player.position && <span className="text-[7px] px-1 py-0 rounded font-bold bg-white text-amber-500 border-2 border-yellow-400">独</span>}
-                                    </div>
-                                    <div className="text-center">
-                                        <span className="text-xs text-white/60">{player.cardCount || 0}张</span>
-                                        {score > 0 && <div className="text-[9px] text-emerald-400">+{score}</div>}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {game.status === EGameStatus.PLAYING && (
-                        <div className="p-2 border-t border-white/10">
-                            {(() => {
-                                const currentPlayer = players.find(p => p.position === game.currentPlayer);
-                                const isMyTurn = game.currentPlayer === game.myPosition;
-                                return (
-                                    <div className={cn('text-center text-[10px] rounded p-1.5', isMyTurn ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/60')}>
-                                        {isMyTurn ? '▶你的回合' : `${currentPlayer?.username?.substring(0,4)||'?'}出牌`}
-                                    </div>
-                                );
-                            })()}
-                            {/* 甩牌失败消息 */}
-                            {game.throwBlockerCard && (
-                                <div className="mt-1 p-1.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[9px] text-center animate-pulse">
-                                    ⚠ {game.throwBlockerCard}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* ====== 右侧边栏：主牌 + 友牌 ====== */}
-                {game.trumpSuit && game.status !== EGameStatus.WAITING && (
-                    <div className="hidden sm:flex flex-col items-center justify-start pt-3 px-1 md:px-2 border-l border-white/10 bg-black/20 backdrop-blur-sm flex-shrink-0 gap-2 relative group">
-                        {/* 展开/收起按钮 */}
-                        <button
-                            onClick={() => setRightSidebarExpanded(!rightSidebarExpanded)}
-                            className={cn(
-                                'absolute -left-3 top-3 w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all duration-200',
-                                'bg-black/60 border border-white/20 hover:bg-black/80 hover:border-white/40',
-                                'opacity-0 group-hover:opacity-100',
-                                rightSidebarExpanded ? 'rotate-0' : 'rotate-180'
-                            )}
-                        >
-                            ‹
-                        </button>
-
-                        {/* 主牌 */}
-                        {rightSidebarExpanded ? (
-                            <div className={cn(
-                                'w-full rounded-xl glass-card px-2 py-2 border flex flex-col items-center gap-0.5',
-                                getSuitBgClass(game.trumpSuit)
-                            )}>
-                                <span className="text-[9px] text-white/50">主牌</span>
-                                <span className={cn('text-xl font-black leading-none', getSuitClass(game.trumpSuit))}>
-                                    {SUIT_SYMBOLS[game.trumpSuit] ?? ''}
-                                </span>
-                                <span className="text-[10px] font-bold text-white/80">
-                                    {(game.trumpRank ?? game.currentLevel)}级
-                                </span>
-                            </div>
-                        ) : (
-                            <div className={cn(
-                                'w-10 h-10 rounded-lg border flex items-center justify-center',
-                                getSuitBgClass(game.trumpSuit)
-                            )}>
-                                <span className={cn('text-lg font-black', getSuitClass(game.trumpSuit))}>
-                                    {SUIT_SYMBOLS[game.trumpSuit] ?? ''}
-                                </span>
-                            </div>
-                        )}
-
-                        {/* 友牌 */}
-                        {game.hostCalledCard && (
-                            rightSidebarExpanded ? (
-                                <div className="w-full rounded-xl glass-card glass-purple border border-purple-400/30 px-2 py-2 shadow-[0_2px_12px_rgba(139,92,246,0.3)] flex flex-col items-center gap-0.5">
-                                    <span className="text-[9px] text-purple-300/70">友牌</span>
-                                    <div className={cn(
-                                        'w-8 h-11 rounded-lg border flex flex-col items-center justify-center font-bold',
-                                        game.hostCalledCard.suit === 'hearts' || game.hostCalledCard.suit === 'diamonds'
-                                            ? 'bg-red-500/20 border-red-400/50 text-red-500'
-                                            : game.hostCalledCard.suit === 'clubs' || game.hostCalledCard.suit === 'spades'
-                                                ? 'bg-slate-500/20 border-slate-400/50 text-slate-200'
-                                                : 'bg-purple-500/20 border-purple-400/50 text-purple-400'
-                                    )}>
-                                        <span className="text-sm leading-none font-black">{SUIT_SYMBOLS[game.hostCalledCard.suit] ?? ''}</span>
-                                        <span className="text-[10px] leading-none font-bold">{game.hostCalledCard.value}</span>
-                                    </div>
-                                    <span className="text-[8px] text-purple-300/60">第{game.hostCalledCard.position}张</span>
-                                </div>
-                            ) : (
-                                <div className={cn(
-                                    'w-10 h-12 rounded-lg border flex flex-col items-center justify-center font-bold',
-                                    game.hostCalledCard.suit === 'hearts' || game.hostCalledCard.suit === 'diamonds'
-                                        ? 'bg-red-500/20 border-red-400/50 text-red-500'
-                                        : game.hostCalledCard.suit === 'clubs' || game.hostCalledCard.suit === 'spades'
-                                            ? 'bg-slate-500/20 border-slate-400/50 text-slate-200'
-                                            : 'bg-purple-500/20 border-purple-400/50 text-purple-400'
-                                )}>
-                                    <span className="text-xs leading-none font-black">{SUIT_SYMBOLS[game.hostCalledCard.suit] ?? ''}</span>
-                                    <span className="text-[9px] leading-none font-bold">{game.hostCalledCard.value}</span>
-                                </div>
-                            )
-                        )}
-                    </div>
-                )}
-
-                {/* ====== 游戏桌面（PC右侧/手机全宽）====== */}
-                <div className="flex-1 relative flex flex-col overflow-hidden">
-                    {/* 手机端：玩家信息条 */}
-                    <div className="sm:hidden flex items-center justify-between px-2 py-1 border-b border-white/10 bg-black/30">
-                        <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
-                            {players.map((player) => {
-                                const isMe = player.id === Number(user?.id);
-                                const isCurrentTurn = game.currentPlayer === player.position;
-                                const isDealer = dealerTeam.includes(player.id);
-                                const isOnFire = game.friendRevealed && (isDealer || player.position === game.friendSeat);
-                                const isSoloMode = game.friendRevealed && game.friendSeat === game.dealerSeat;
-                                const biggestCard = getCurrentWinner();
-                                const isBiggest = biggestCard && biggestCard.playerId === player.id;
-                                const isThrowBlocker = game.throwBlocker === player.position;
-                                return (
-                                    <div key={player.id} className={cn('flex-shrink-0 flex items-center gap-1 rounded-full px-2 py-0.5 border text-[9px] relative', isThrowBlocker ? 'bg-red-500/30 border-red-500/60 ring-1 ring-red-400/50' : isCurrentTurn ? 'bg-purple-500/30 border-purple-400/60' : 'bg-white/5 border-white/10', isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'), isBiggest && game.currentTrick.length > 0 && 'ring-1 ring-yellow-400')}>
-                                        {isOnFire && <div className={isSoloMode ? 'fire-particles-blue' : 'fire-particles'} />}
-                                        {isBiggest && game.currentTrick.length > 0 && (
-                                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
-                                        )}
-                                        <span className={isThrowBlocker ? 'text-red-300' : isCurrentTurn ? 'text-purple-300' : ''}>{isThrowBlocker ? '⚠' : isCurrentTurn ? '▶' : ''}</span>
-                                        <span className={isMe ? 'text-amber-300 font-medium' : 'text-white/80'}>{player.username.substring(0,3)}</span>
-                                        {isDealer && <span className="text-amber-400">庄</span>}
-                                        {player.isAI && <span className="text-blue-400">AI</span>}
-                                        {isSoloMode && game.dealerSeat === player.position && <span className="font-bold text-amber-500 border border-yellow-400 rounded px-0.5 text-[8px]">独</span>}
-                                        <span className="text-white/40">{player.cardCount||0}</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        {game.status === EGameStatus.PLAYING && (
-                            <div className="flex-shrink-0 text-[10px] px-2">
-                                {game.currentPlayer === game.myPosition ? (
-                                    <span className="text-emerald-400">你的回合</span>
-                                ) : (
-                                    <span className="text-white/50">等待...</span>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
+            <div className="flex flex-1 min-h-0 overflow-hidden flex-row">
+                {/* ====== 游戏桌面（全宽，玩家栏在桌布内部）====== */}
+                <div className="flex-1 min-h-0 relative flex flex-col overflow-hidden">
                     {/* 游戏桌面 */}
-                    <div className="flex-1 relative flex items-center justify-center p-1 sm:p-4 overflow-hidden">
-                        <div className="relative w-full h-full max-w-3xl max-h-full rounded-xl sm:rounded-3xl border-2 sm:border-[3px] border-white/20 game-table-surface shadow-inner flex flex-col items-center justify-center overflow-hidden">
+                    <div className="flex-1 min-h-0 relative flex items-stretch justify-center p-1 sm:p-4 overflow-hidden">
+                        <div
+                            ref={tableSurfaceRef}
+                            className="relative w-full h-full max-w-3xl rounded-xl sm:rounded-3xl border-2 sm:border-[3px] border-white/20 game-table-surface shadow-inner overflow-hidden"
+                        >
+                            {/* ====== 桌布内左侧玩家栏：5 行均分，顶满高度 ====== */}
+                            <div className="absolute inset-y-0 left-0 w-14 sm:w-20 md:w-24 flex flex-col z-20 border-r border-white/10 bg-black/25 backdrop-blur-sm">
+                                {[1, 2, 3, 4, 5].map(seat => {
+                                    const player = players.find(p => p.position === seat);
+                                    if (!player) {
+                                        return (
+                                            <div key={seat} className="flex-1 min-h-0 flex items-center justify-center border-b border-white/5 last:border-b-0">
+                                                <span className="text-[9px] text-white/30">空位{seat}</span>
+                                            </div>
+                                        );
+                                    }
+                                    const isMe = player.id === Number(user?.id);
+                                    const isCurrentTurn = game.currentPlayer === player.position;
+                                    const isDealer = dealerTeam.includes(player.id);
+                                    const isOnFire = game.friendRevealed && (isDealer || player.position === game.friendSeat);
+                                    const isSoloMode = game.friendRevealed && game.friendSeat === game.dealerSeat;
+                                    const biggestCard = getCurrentWinner();
+                                    const isBiggest = biggestCard && biggestCard.playerId === player.id;
+                                    const isThrowBlocker = game.throwBlocker === player.position;
+                                    const score = game.scores?.[player.id] || 0;
+                                    return (
+                                        <div
+                                            key={seat}
+                                            ref={el => { seatRefs.current[seat] = el; }}
+                                            data-seat={seat}
+                                            className={cn(
+                                                'flex-1 min-h-0 flex flex-col items-center justify-center px-0.5 py-0.5 border-b border-white/5 last:border-b-0 relative transition-all',
+                                                isThrowBlocker ? 'bg-red-500/20' : isCurrentTurn ? 'bg-purple-500/15' : '',
+                                                isOnFire && (isSoloMode ? 'fire-blue' : 'fire-border'),
+                                                isBiggest && game.currentTrick.length > 0 && 'ring-1 ring-inset ring-yellow-400'
+                                            )}
+                                        >
+                                            {isOnFire && <div className={isSoloMode ? 'fire-particles-blue' : 'fire-particles'} />}
+                                            <div className={cn(
+                                                'relative flex items-center justify-center rounded-full border h-7 w-7 sm:h-9 sm:w-9 flex-shrink-0',
+                                                isThrowBlocker ? 'border-red-500 bg-red-500/30' : isCurrentTurn ? 'border-purple-400 bg-purple-500/25' : 'border-white/30 bg-white/10'
+                                            )}>
+                                                {player.isAI ? <span className="text-xs sm:text-sm z-10">🤖</span> : <User className="h-3.5 w-3.5 sm:h-5 sm:w-5 text-white/80 z-10" />}
+                                                {isCurrentTurn && <div className="absolute -inset-0.5 rounded-full animate-pulse border border-purple-400/60" />}
+                                            </div>
+                                            <span className={cn('block truncate w-full text-center text-[9px] sm:text-[10px] mt-0.5 leading-tight', isMe ? 'text-amber-300 font-medium' : 'text-white/85')}>{player.username}</span>
+                                            <div className="flex flex-wrap items-center justify-center gap-0.5 leading-none">
+                                                {isDealer && <span className="text-[7px] sm:text-[8px] px-0.5 rounded-sm bg-amber-500/30 text-amber-200">庄</span>}
+                                                {player.isFriend && <span className="text-[7px] sm:text-[8px] px-0.5 rounded-sm bg-pink-500/30 text-pink-200">友</span>}
+                                                {isSoloMode && game.dealerSeat === player.position && <span className="text-[7px] sm:text-[8px] px-0.5 rounded-sm font-bold bg-yellow-400 text-amber-900">独</span>}
+                                            </div>
+                                            <span className="text-[8px] sm:text-[10px] text-white/55 leading-none mt-0.5">{player.cardCount || 0}张{score > 0 ? ` +${score}` : ''}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
 
-                            {/* 上一轮出牌 - 可折叠 */}
-                            {game.lastCompletedTrick && game.lastCompletedTrick.length > 0 && (
-                                <div className="w-full px-2 sm:px-4 mb-1 sm:mb-2">
-                                    <button
-                                        onClick={() => setShowLastTrick(!showLastTrick)}
-                                        className="flex items-center gap-1 text-[9px] sm:text-xs text-white/50 hover:text-white/80 transition-colors mb-1"
-                                    >
-                                        <span className={cn('transition-transform', showLastTrick && 'rotate-90')}>▶</span>
-                                        <span>上一轮 ({game.lastCompletedTrick.length}人)</span>
-                                    </button>
-                                    {showLastTrick && (
-                                        <div className="flex flex-col justify-center gap-0.5 sm:gap-1 opacity-60">
-                                            {game.lastCompletedTrick.map((played, i) => {
-                                                const player = players.find(p => p.id === played.playerId);
-                                                const colorIdx = (i % 5) + 1;
-                                                const color = PLAYER_COLORS[colorIdx as keyof typeof PLAYER_COLORS] ?? PLAYER_COLORS[1];
-                                                const lastWinner = getLastTrickWinner();
-                                                const isLastWinner = lastWinner && lastWinner.playerId === played.playerId;
+                            {/* ====== 牌垫区域：桌布除左侧玩家栏外的右半部分 ====== */}
+                            <div
+                                ref={(el) => { cardMatRef.current = el; setCardMatEl(el); }}
+                                className="absolute inset-y-0 left-14 sm:left-20 md:left-24 right-0 flex flex-col"
+                            >
+                                {/* 发牌飞牌动画 overlay */}
+                                {showDealAnim && (
+                                    <>
+                                        <div
+                                            key={dealAnimKey}
+                                            className="pointer-events-none absolute inset-0 z-30"
+                                            aria-hidden="true"
+                                        >
+                                            <div
+                                                className="deal-flying-card"
+                                                style={
+                                                    {
+                                                        '--seat-x': flyOffset.x,
+                                                        '--seat-y': flyOffset.y,
+                                                        '--delay': '0s',
+                                                    } as React.CSSProperties
+                                                }
+                                            >
+                                                <div className="deal-card-back" />
+                                            </div>
+                                        </div>
+                                        <div
+                                            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+                                            data-testid="deal-anim-banner"
+                                        >
+                                            <div className="px-4 py-2 rounded-full text-sm sm:text-base font-bold tracking-wide text-amber-100 bg-amber-900/70 border border-amber-300/50 backdrop-blur-sm shadow-lg">
+                                                发牌中 {dealtRound}/{totalCardsPerPlayer} · 座位 {flyingSeat}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+
+                                {/* 扣底牌阶段：显示即将扣下的 7 张底牌 */}
+                                {game.status === EGameStatus.DISCARDING && game.bottomCards && game.bottomCards.length > 0 && (
+                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-2">
+                                        <div className="text-[10px] sm:text-xs text-amber-200 mb-2">底牌（{game.bottomCards.length} 张）</div>
+                                        <div className="flex gap-1 flex-wrap justify-center max-w-[90%]">
+                                            {game.bottomCards.map((card, i) => (
+                                                <div key={i} className="h-12 w-8 sm:h-14 sm:w-10 flex flex-col items-center justify-center rounded-md font-bold border-2 border-amber-400/60 bg-white/15 backdrop-blur-sm overflow-hidden shadow-lg">
+                                                    {isJoker(card) ? (
+                                                        <img src={getJokerImageUrl(card)} alt={card.value === 'Big' ? '大王' : '小王'} className="w-full h-full object-contain" />
+                                                    ) : (
+                                                        <>
+                                                            <span className={cn(getSuitClass(card.suit), 'text-base sm:text-lg leading-none font-black')}>{SUIT_SYMBOLS[card.suit]||''}</span>
+                                                            <span className={cn(getSuitClass(card.suit), 'text-xs sm:text-sm leading-none font-bold')}>{card.value}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 翻底牌定庄动画：
+                                    - 'flipping' 阶段：7 张底牌从左到右翻开（每张 1.5s 翻 + 0.5s 停顿）。
+                                    - 'finished' 阶段（约 3 秒）：所有牌保持翻开状态展示，让最后一张牌的动画播放完整、并展示翻牌结果。
+                                    - flipHoldUntil 保留期：即使 status 已切到 DISCARDING，
+                                      只要最近一次翻牌动画（任何一张，包括中间触发定庄的那张）还没播完 2s，
+                                      仍保持翻牌画面，确保任意定庄牌的翻牌动画完整呈现。
+                                    - 一旦 status 切到 'discarding' 且保留期过去，由"扣底牌"对话框接管展示级牌 + 底牌。 */}
+                                {((game.status === EGameStatus.CALLING
+                                        && (game.callPhase === 'flipping' || game.callPhase === 'finished'))
+                                    || (nowTick < flipHoldUntil && game.flippedBottomCards && game.flippedBottomCards.length > 0))
+                                    && game.bottomCards && game.bottomCards.length > 0 && (
+                                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-2 pointer-events-none">
+                                        <div className="text-[10px] sm:text-xs text-amber-200/80 mb-2 animate-pulse">
+                                            {game.callPhase === 'flipping'
+                                                ? `翻底定庄中 · 已翻 ${game.flippedBottomCards?.length ?? 0}/${game.bottomCards.length}`
+                                                : '定庄完成'}
+                                        </div>
+                                        <div className="flex gap-1.5 sm:gap-2 justify-center" style={{ perspective: '800px' }}>
+                                            {game.bottomCards.map((card, i) => {
+                                                const flippedCount = game.flippedBottomCards?.length ?? 0;
+                                                const isFlipped = i < flippedCount;
+                                                const isCurrentlyFlipping = i === flippedCount - 1; // 最新翻开的那张播放动画
                                                 return (
-                                                    <div key={i} className={cn('flex items-center gap-1 rounded px-1.5 py-0.5 sm:px-2 sm:py-1 backdrop-blur-md border relative', color.bg, color.border, isLastWinner && 'ring-1 ring-yellow-400')}>
-                                                        {isLastWinner && (
-                                                            <div className="absolute -top-0.5 -right-0.5 px-1 py-0.5 rounded-full bg-yellow-400 text-[7px] sm:text-[9px] font-bold text-black">赢</div>
-                                                        )}
-                                                        <div className={cn(
-                                                            'flex-shrink-0 px-1 py-0 rounded-full text-[8px] sm:text-[10px] font-bold border backdrop-blur-sm',
-                                                            color.badge
-                                                        )}>
-                                                            {player?.username?.substring(0, 3) || '?'}
-                                                        </div>
-                                                        <div className="flex gap-px sm:gap-0.5 flex-wrap">
-                                                            {played.cards.map((card, j) => (
-                                                                <div key={j} className={cn('h-5 w-3.5 sm:h-6 sm:w-4.5 flex-col items-center justify-center rounded font-bold border backdrop-blur-sm bg-white/10 overflow-hidden flex', color.border)}>
-                                                                    {isJoker(card) ? (
-                                                                        <img src={getJokerImageUrl(card)} alt="" className="w-full h-full object-contain opacity-70" />
-                                                                    ) : (
-                                                                        <>
-                                                                            <span className={cn(getSuitClass(card.suit), 'text-[7px] sm:text-[9px] leading-none font-black')}>{SUIT_SYMBOLS[card.suit]||''}</span>
-                                                                            <span className={cn(getSuitClass(card.suit), 'text-[6px] sm:text-[7px] leading-none font-bold')}>{card.value}</span>
-                                                                        </>
-                                                                    )}
+                                                    <div
+                                                        key={i}
+                                                        className="w-10 h-14 sm:w-12 sm:h-16 relative"
+                                                    >
+                                                        <div
+                                                            className="absolute inset-0"
+                                                            style={{
+                                                                transformStyle: 'preserve-3d',
+                                                                transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                                                                transition: isCurrentlyFlipping ? 'transform 1.5s ease-in-out' : 'none',
+                                                            }}
+                                                        >
+                                                            {/* 卡背 */}
+                                                            <div
+                                                                className="absolute inset-0 rounded-xl border-2 border-white/20 bg-blue-900/40 backdrop-blur-sm shadow-lg flex items-center justify-center"
+                                                                style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+                                                            >
+                                                                <div className="w-[85%] h-[85%] rounded-md bg-gradient-to-br from-blue-600/70 to-blue-800/70 border border-blue-400/30 flex items-center justify-center">
+                                                                    <span className="text-[8px] text-blue-200/60 font-bold">?</span>
                                                                 </div>
-                                                            ))}
+                                                            </div>
+                                                            {/* 卡面：用 PlayingCard 保证与手牌外观一致 */}
+                                                            <div
+                                                                className="absolute inset-0"
+                                                                style={{
+                                                                    backfaceVisibility: 'hidden',
+                                                                    WebkitBackfaceVisibility: 'hidden',
+                                                                    transform: 'rotateY(180deg)',
+                                                                }}
+                                                            >
+                                                                <PlayingCard
+                                                                    card={card}
+                                                                    size="sm"
+                                                                    isTrumpRank={game.trumpRank != null && card.value === game.trumpRank}
+                                                                />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 );
                                             })}
                                         </div>
-                                    )}
-                                </div>
-                            )}
+                                    </div>
+                                )}
 
-                            {/* 当前出牌区域 - 桌面内部 */}
-                            {game.status === EGameStatus.PLAYING && game.currentTrick.length > 0 && (
-                                <div className="w-full px-2 sm:px-4 mb-2 sm:mb-4">
-                                    <div className="flex flex-col justify-center gap-1 sm:gap-2">
-                                        {game.currentTrick.map((played, i) => {
-                                            const player = players.find(p => p.id === played.playerId);
-                                            const colorIdx = (i % 5) + 1;
-                                            const color = PLAYER_COLORS[colorIdx as keyof typeof PLAYER_COLORS] ?? PLAYER_COLORS[1];
+                                {/* 打牌阶段：5 行均分，每行与左侧对应玩家头像对齐 */}
+                                {game.status === EGameStatus.PLAYING && (
+                                    <div className="absolute inset-0 z-10 flex flex-col">
+                                        {[1, 2, 3, 4, 5].map(seat => {
+                                            const player = players.find(p => p.position === seat);
+                                            const played = player ? game.currentTrick.find(t => t.playerId === player.id) : undefined;
+                                            const lastPlayed = player && !played && game.lastCompletedTrick ? game.lastCompletedTrick.find(t => t.playerId === player.id) : undefined;
+                                            const showCards = played || (showLastTrick && lastPlayed);
+                                            const cardsToShow = played ? played.cards : (lastPlayed ? lastPlayed.cards : []);
                                             const biggestCard = getCurrentWinner();
-                                            const isBiggest = biggestCard && biggestCard.playerId === played.playerId;
+                                            const isBiggest = played && biggestCard && biggestCard.playerId === played.playerId;
                                             return (
-                                                <div key={i} className={cn('flex items-center gap-2 rounded-lg px-2 py-1 sm:px-3 sm:py-1.5 backdrop-blur-md border relative', color.bg, color.border, isBiggest && 'ring-2 ring-yellow-400')}>
-                                                    {isBiggest && (
-                                                        <div className="absolute -top-1 -right-1 px-1 py-0.5 rounded-full bg-yellow-400 text-[8px] sm:text-[10px] font-bold text-black">最大</div>
-                                                    )}
-                                                    <div className={cn(
-                                                        'flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] sm:text-xs font-bold border backdrop-blur-sm',
-                                                        color.badge
-                                                    )}>
-                                                        {player?.username?.substring(0, 4) || '?'}
-                                                    </div>
-                                                    <div className="flex gap-0.5 sm:gap-1 flex-wrap">
-                                                        {played.cards.map((card, j) => (
-                                                            <div key={j} className={cn('h-6 w-4 sm:h-9 sm:w-6 flex-col items-center justify-center rounded-md font-bold border backdrop-blur-sm bg-white/10 overflow-hidden flex', color.border)}>
-                                                                {isJoker(card) ? (
-                                                                    <img src={getJokerImageUrl(card)} alt={card.value === 'Big' ? '大王' : '小王'} className="w-full h-full object-contain" />
-                                                                ) : (
-                                                                    <>
-                                                                        <span className={cn(getSuitClass(card.suit), 'text-[9px] sm:text-xs leading-none font-black')}>{SUIT_SYMBOLS[card.suit]||''}</span>
-                                                                        <span className={cn(getSuitClass(card.suit), 'text-[7px] sm:text-[10px] leading-none font-bold')}>{card.value}</span>
-                                                                    </>
-                                                                )}
+                                                <div key={seat} className="flex-1 min-h-0 flex items-center px-2 sm:px-3 gap-1 border-b border-white/5 last:border-b-0 relative">
+                                                    {showCards && cardsToShow.length > 0 ? (
+                                                        <>
+                                                            {isBiggest && (
+                                                                <div className="absolute left-1 top-1 px-1 py-0.5 rounded bg-yellow-400 text-[8px] sm:text-[10px] font-bold text-black z-10">最大</div>
+                                                            )}
+                                                            <div className={cn('flex gap-0.5 sm:gap-1 flex-wrap h-full items-center', !played && 'opacity-50')}>
+                                                                {cardsToShow.map((card, j) => (
+                                                                    <div key={j} className={cn(
+                                                                        'h-full max-h-12 sm:max-h-16 aspect-[2/3] flex flex-col items-center justify-center rounded-md font-bold border bg-white/15 backdrop-blur-sm overflow-hidden',
+                                                                        isBiggest ? 'border-yellow-400/60' : 'border-white/30'
+                                                                    )}>
+                                                                        {isJoker(card) ? (
+                                                                            <img src={getJokerImageUrl(card)} alt={card.value === 'Big' ? '大王' : '小王'} className="w-full h-full object-contain" />
+                                                                        ) : (
+                                                                            <>
+                                                                                <span className={cn(getSuitClass(card.suit), 'text-sm sm:text-lg leading-none font-black')}>{SUIT_SYMBOLS[card.suit]||''}</span>
+                                                                                <span className={cn(getSuitClass(card.suit), 'text-[10px] sm:text-sm leading-none font-bold')}>{card.value}</span>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
                                                             </div>
-                                                        ))}
-                                                    </div>
+                                                        </>
+                                                    ) : null}
                                                 </div>
                                             );
                                         })}
                                     </div>
-                                </div>
-                            )}
+                                )}
 
-                            {/* 无出牌时 */}
-                            {game.status === EGameStatus.PLAYING && game.currentTrick.length === 0 && (
-                                <div className="z-10 text-center p-4">
-                                    <div className="text-white/30 text-sm sm:text-lg">等待出牌...</div>
-                                    {game.currentPlayer === game.myPosition && (
-                                        <div className="mt-2 text-emerald-400/60 text-xs sm:text-sm">请选择手牌</div>
-                                    )}
-                                </div>
-                            )}
+                                {/* 上一轮折叠按钮 */}
+                                {game.status === EGameStatus.PLAYING && game.lastCompletedTrick && game.lastCompletedTrick.length > 0 && game.currentTrick.length === 0 && (
+                                    <button
+                                        onClick={() => setShowLastTrick(!showLastTrick)}
+                                        className="absolute top-1 right-1 z-20 flex items-center gap-1 text-[9px] sm:text-xs text-white/50 hover:text-white/80 transition-colors px-1.5 py-0.5 rounded bg-black/30 border border-white/10"
+                                    >
+                                        <span className={cn('transition-transform', showLastTrick && 'rotate-90')}>▶</span>
+                                        <span>上一轮</span>
+                                    </button>
+                                )}
 
-                            {/* 非进行中状态提示 */}
-                            {game.status !== EGameStatus.PLAYING && (
-                                <div className="z-10 text-center p-4">
-                                    <div className="text-white/30 text-sm sm:text-base">{game.status === EGameStatus.WAITING ? '等待开始...' : ''}</div>
-                                </div>
-                            )}
+                                {/* 等待状态提示 */}
+                                {game.status === EGameStatus.WAITING && (
+                                    <div className="absolute inset-0 flex items-center justify-center text-white/30 text-sm">等待开始...</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* ====== 全屏对话框（渲染在游戏桌之上）====== */}
-            {/* 叫庄对话框 */}
-            {showCallDialog && (
-                <CallDealerDialog
-                    onSubmit={handleCallDealer}
-                    isPending={callDealerMutation.isPending}
-                    currentLevel={game.trumpRank || '2'}
-                />
-            )}
+            {/* 注意：亮庄/反庄面板不在此处，它已迁移到桌布外部、手牌区上方（见下方"亮庄面板"） */}
 
-            {/* 扣牌对话框 */}
-            {showDiscardDialog && (
+            {/* 扣牌对话框：以 portal 形式贴在牌垫上，尺寸与位置完全跟随牌垫。
+                内嵌"翻底定庄"信息：级牌（trumpSuit + trumpRank）+ 庄家座位 + 底牌（默认展开、与手牌外观一致）。 */}
+            {showDiscardDialog && cardMatEl && createPortal(
                 <DiscardDialog
                     bottomCards={game.bottomCards}
                     onSubmit={handleDiscard}
                     isPending={discardMutation.isPending}
-                />
+                    trumpSuit={game.trumpSuit}
+                    trumpRank={game.trumpRank}
+                    dealerSeat={game.dealerSeat}
+                    myHand={game.myHand}
+                    embedded
+                />,
+                cardMatEl,
             )}
 
-            {/* 叫朋友对话框 */}
-            {showCallFriendDialog && (
-                callFriendMinimized ? (
-                    // 最小化状态：显示浮动恢复按钮
-                    <button
-                        onClick={() => setCallFriendMinimized(false)}
-                        className="fixed bottom-24 right-4 z-50 rounded-full w-14 h-14 flex flex-col items-center justify-center gap-0.5 glass-card border border-purple-400/50 shadow-[0_4px_20px_rgba(139,92,246,0.4)] text-white/80 hover:text-white hover:bg-purple-500/20 transition-all"
+            {/* 按钮层：以 portal 形式贴在牌垫上，承载"开始游戏"等悬浮按钮 */}
+            {cardMatEl && game.status === EGameStatus.WAITING && isSinglePlayerRoute && createPortal(
+                <div
+                    className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 rounded-xl bg-black/30 backdrop-blur-[2px] pointer-events-none"
+                    aria-label="按钮层"
+                >
+                    <p className="text-xs sm:text-sm text-white/70 pointer-events-auto">
+                        单人模式：随时点击开始游戏
+                    </p>
+                    <Button
+                        variant="game"
+                        size="default"
+                        className="gap-1 sm:gap-2 text-sm sm:text-base font-bold pointer-events-auto"
+                        onClick={() => startSinglePlayerMutation.mutate()}
+                        disabled={startSinglePlayerMutation.isPending}
                     >
-                        <span className="text-base">👥</span>
-                        <span className="text-[9px] font-bold">叫朋友</span>
-                    </button>
-                ) : (
-                    <CallFriendDialog
-                        onSubmit={handleCallFriend}
-                        onMinimize={() => setCallFriendMinimized(true)}
-                        isPending={callFriendMutation.isPending}
-                        currentLevel={game.currentLevel}
-                        playerHand={game.myHand}
-                    />
-                )
+                        {startSinglePlayerMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+                        ) : (
+                            <>
+                                <Play className="h-4 w-4 sm:h-5 sm:w-5" />
+                                开始游戏
+                            </>
+                        )}
+                    </Button>
+                </div>,
+                cardMatEl,
             )}
+
+            {/* 亮庄倒计时通知：以 portal 形式贴在牌垫中央，显示倒计时和当前亮庄状态 */}
+            {cardMatEl && game.status === EGameStatus.CALLING && game.callPhase === 'counting' && localCountdown != null && localCountdown > 0 && createPortal(
+                <div
+                    className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 pointer-events-none"
+                    aria-label="亮庄倒计时"
+                >
+                    <div className="px-4 py-2 rounded-full text-sm sm:text-base font-bold tracking-wide text-amber-100 bg-amber-900/70 border border-amber-300/50 backdrop-blur-sm shadow-lg">
+                        亮庄倒计时 {localCountdown}s
+                    </div>
+                    {(() => {
+                        const lastCall = game.callRecords && game.callRecords.length > 0
+                            ? game.callRecords[game.callRecords.length - 1]
+                            : null;
+                        if (lastCall) {
+                            const caller = game.players?.find(p => p.position === lastCall.seat);
+                            const suitSymbol = SUIT_SYMBOLS[lastCall.suit] || '';
+                            const suitColor = lastCall.suit === 'hearts' || lastCall.suit === 'diamonds' ? 'text-red-400' : 'text-slate-100';
+                            return (
+                                <div className="px-3 py-1 rounded-full text-xs sm:text-sm text-white/80 bg-black/40 border border-white/20 backdrop-blur-sm">
+                                    座位{lastCall.seat}{caller ? ` ${caller.username}` : ''} 亮庄：
+                                    <span className={cn(suitColor, 'font-bold')}>{suitSymbol}</span>
+                                    <span className="font-bold text-amber-300">{lastCall.rank}</span>
+                                    ×{lastCall.count}
+                                </div>
+                            );
+                        }
+                        return (
+                            <div className="px-3 py-1 rounded-full text-xs sm:text-sm text-white/50 bg-black/40 border border-white/20 backdrop-blur-sm">
+                                当前无人亮庄，倒计时结束后翻底牌定庄
+                            </div>
+                        );
+                    })()}
+                </div>,
+                cardMatEl,
+            )}
+
+            {/* 翻底定庄公告：内容已合并到 DiscardDialog（扣底牌）中，不再独立展示。 */}
+
+            {/* 叫朋友面板：以 portal 形式嵌入到牌垫中（与扣底牌对话框同样做法）。
+                不再提供"隐藏/唤起"按钮——庄家需要直接在牌垫上完成选择并提交。 */}
+            {showCallFriendDialog && cardMatEl && createPortal(
+                <CallFriendDialog
+                    onSubmit={handleCallFriend}
+                    isPending={callFriendMutation.isPending}
+                    currentLevel={game.currentLevel}
+                    embedded
+                />,
+                cardMatEl,
+            )}
+
+            {/* 亮庄 / 反庄面板：桌布外部下方、手牌区上方
+                仅在 DEALING/CALLING 阶段、且亮庄/反庄阶段尚未结束（callPhase !== 'finished'）时显示；
+                确定庄家后 callPhase 切到 'finished'，本面板立即消失 */}
+            {(game.status === EGameStatus.DEALING || game.status === EGameStatus.CALLING)
+                && game.callPhase !== 'finished'
+                && (() => {
+                    const mySeat = game.myPosition;
+                    const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
+                    const hasPassed = game.passedSeats?.includes(mySeat);
+                    const showPass = !hasCalled && !hasPassed;
+                    return (
+                        <div className="px-2 mt-1">
+                            <CallDealerDialog
+                                onSubmit={handleCallDealer}
+                                isPending={callDealerMutation.isPending}
+                                currentLevel={game.trumpRank || '2'}
+                                myHand={game.myHand}
+                                players={game.players}
+                                myPosition={game.myPosition}
+                                callRecords={game.callRecords}
+                                showPassButton={showPass}
+                                onPass={() => passCallMutation.mutate()}
+                                isPassPending={passCallMutation.isPending}
+                            />
+                        </div>
+                    );
+                })()}
 
             {/* 手牌区域 */}
             <div className="border-t border-white/10 hand-area-glass">
@@ -798,7 +989,7 @@ const game = data?.game;
 
                 {/* 游戏控制按钮 */}
                 <div className="mt-2 sm:mt-3 rounded-xl border border-white/15 game-control-panel p-2 sm:p-4">
-                    {game.status === EGameStatus.WAITING && (
+                    {game.status === EGameStatus.WAITING && !isSinglePlayerRoute && (
                         <div className="flex flex-col items-center gap-2 sm:gap-3">
                             <div className="text-center">
                                 <p className="text-xs sm:text-sm text-white/70">
@@ -884,79 +1075,28 @@ const game = data?.game;
                             <div className="text-center">
                                 <p className="text-lg font-bold text-white/90">发牌中...</p>
                                 <p className="text-sm text-white/60">
-                                    已发 {game.dealtCardCount || 0}/{game.totalCardsPerPlayer || 31} 张/人
+                                    已发 {Math.ceil((game.dealtCardCount || 0) / 5)}/{game.totalCardsPerPlayer || 31} 张/人
+                                    <span className="ml-2 text-white/40">
+                                        （总计 {game.dealtCardCount || 0}/{(game.totalCardsPerPlayer || 31) * 5} 张）
+                                    </span>
                                 </p>
                                 <div className="deal-progress-bar mt-2 w-64">
                                     <div
                                         className="deal-progress-fill"
-                                        style={{ width: `${((game.dealtCardCount || 0) / 31) * 100}%` }}
+                                        style={{ width: `${((game.dealtCardCount || 0) / ((game.totalCardsPerPlayer || 31) * 5)) * 100}%` }}
                                     />
                                 </div>
                             </div>
 
-                            {/* 发牌过程中可以抢庄 */}
+                            {/* 发牌过程中即可亮庄/反庄；倒计时只在发完牌后启动（详见 rules/03-bidding.md §3.0） */}
                             <p className="text-xs text-white/40">
-                                可以在发牌过程中选择级牌进行抢庄
+                                可以在发牌过程中选择级牌进行亮庄/反庄
                             </p>
-
-                            {selectedCardIndices.size > 0 && (
-                                <Button
-                                    variant="game"
-                                    size="sm"
-                                    onClick={() => handleCallDealer(Array.from(selectedCardIndices))}
-                                    disabled={callDealerMutation.isPending}
-                                >
-                                    {callDealerMutation.isPending ? '提交中...' : '抢庄'}
-                                </Button>
-                            )}
                         </div>
                     )}
 
                     <div className="flex flex-col gap-2 sm:gap-3">
-                        {game.status === EGameStatus.CALLING && !showCallDialog && (
-                            <>
-                                {/* 判断当前玩家是否已经叫过庄 */}
-                                {(() => {
-                                    const mySeat = game.myPosition;
-                                    const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
-                                    const hasPassed = game.passedSeats?.includes(mySeat);
-                                    const hasSomeoneCalled = (game.callRecords?.length ?? 0) > 0;
-                                    const isFinished = game.callPhase === 'finished';
-
-                                    // 如果已经叫过庄或已结束，不显示叫庄按钮
-                                    if (hasCalled || isFinished) {
-                                        return null;
-                                    }
-
-                                    return (
-                                        <>
-                                            {/* 叫庄/抢庄按钮 */}
-                                            <Button
-                                                variant="game"
-                                                size="default"
-                                                className="gap-1 sm:gap-2 text-sm sm:text-base font-bold w-full sm:w-auto"
-                                                onClick={() => setShowCallDialog(true)}
-                                                disabled={hasPassed}
-                                            >
-                                                {hasSomeoneCalled ? '抢庄' : '叫庄'}
-                                            </Button>
-                                            {/* 不叫按钮 - 如果还没选择不叫 */}
-                                            {!hasPassed && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="default"
-                                                    className="gap-1 sm:gap-2 text-sm sm:text-base w-full sm:w-auto"
-                                                    onClick={() => passCallMutation.mutate()}
-                                                    disabled={passCallMutation.isPending}
-                                                >
-                                                    不叫
-                                                </Button>
-                                            )}
-                                        </>
-                                    );
-                                })()}
-                            </>
-                        )}
+                        {/* "不叫庄" 按钮已移至上方 CallDealerDialog 同一行，此处不再渲染 */}
                         {game.status === EGameStatus.DISCARDING && game.dealerSeat === game.myPosition && !showDiscardDialog && (
                             <Button
                                 variant="game"

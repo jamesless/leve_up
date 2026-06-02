@@ -77,22 +77,25 @@ type GameTable struct {
 	CreatedAt          time.Time           `json:"createdAt"`
 	UpdatedAt          time.Time           `json:"updatedAt"`
 
-	// 抢庄相关字段
+	// 亮庄/反庄相关字段（详见 rules/03-bidding.md）
+	// 历史上称为"抢庄"，已统一为"亮庄"
 	DealerSeat         int          `json:"dealerSeat"`         // 庄家座位号
 	StartingDealerSeat int          `json:"startingDealerSeat"` // 起始发牌人座位号
-	CallPhase          string       `json:"callPhase"`          // 抢庄阶段: counting, flipping, finished
-	CallCountdown      int          `json:"callCountdown"`      // 抢庄倒计时（秒）
-	CurrentCaller      int          `json:"currentCaller"`      // 当前叫庄者座位号
+	CallPhase          string       `json:"callPhase"`          // 阶段: dealing(发牌中) / counting(倒计时) / flipping(翻底) / finished
+	CallCountdown      int          `json:"callCountdown"`      // 亮庄倒计时（秒）；发牌期间为 0
+	CurrentCaller      int          `json:"currentCaller"`      // 当前亮庄者座位号
 	TrumpRank          string       `json:"trumpRank"`          // 级牌点数（如"2"表示打2级）
 	FlippedBottomCards []Card       `json:"flippedBottomCards"` // 已翻开的底牌
-	CallRecords        []CallRecord `json:"callRecords"`        // 抢庄记录
-	PassedSeats        []int        `json:"passedSeats"`        // 选择不叫的玩家座位号列表
+	CallRecords        []CallRecord `json:"callRecords"`        // 亮庄/反庄记录
+	PassedSeats        []int        `json:"passedSeats"`        // 选择"不叫庄"的玩家座位号列表
+	FlipStartedAt      time.Time    `json:"flipStartedAt"`      // 翻底阶段开始的时间戳；用于按 3 秒/张推算应翻数量
 
 	// 发牌相关字段
 	DealingPhase        string `json:"dealingPhase"`        // 发牌阶段: dealing, finished
-	DealtCardCount      int    `json:"dealtCardCount"`      // 已发牌轮数（每轮5张，每人1张）
+	DealtCardCount      int    `json:"dealtCardCount"`      // 已发牌总张数（0..numPlayers*31）
 	TotalCardsPerPlayer int    `json:"totalCardsPerPlayer"` // 每人总牌数（31）
 	DealingCards        []Card `json:"-"`                   // 待发的牌（不返回给前端）
+	LastDealtSeat       int    `json:"lastDealtSeat"`       // 上一张牌发给的座位号（供前端动画显示）
 
 	// 上一局结果（用于确定下一局起始发牌人）
 	PreviousResult *PreviousGameResult `json:"previousResult,omitempty"` // 上一局结果
@@ -155,6 +158,9 @@ type PlayResult struct {
 
 // In-memory game storage (in production, use Redis or similar)
 var activeGames = make(map[string]*GameTable)
+
+// 翻底牌动画节奏：每 3 秒自动翻开一张（详见 rules/03-bidding.md §3.4）
+const flipBottomCardIntervalSec = 3
 
 // StartGame initializes and starts a game with progressive card dealing
 func StartGame(gameID, hostID string) (*GameTable, error) {
@@ -227,7 +233,7 @@ func StartGame(gameID, hostID string) (*GameTable, error) {
 		StartingDealerSeat:  startingDealer,
 		CurrentCaller:       startingDealer,
 		CallPhase:           "dealing", // 发牌中
-		CallCountdown:       0,         // 发牌完成后才开始倒计时
+		CallCountdown:       0,         // 发牌期间不倒计时；发完最后一张才启动 10 秒
 		TrumpRank:           game.CurrentLevel,
 		FlippedBottomCards:  make([]Card, 0),
 		CallRecords:         make([]CallRecord, 0),
@@ -305,8 +311,10 @@ func createShuffledDeck() []Card {
 	return allCards
 }
 
-// DealNextCard 发下一轮牌给所有玩家（每人1张）
+// DealNextCard 按规则的逆时针顺序发出"下一张"牌
 // 返回值：(更新后的table, 是否发牌完成, error)
+// 顺序：从 StartingDealerSeat 开始，按逆时针 1→5→4→3→2→1... 每次发一张
+// 每位玩家共 TotalCardsPerPlayer (31) 张，5 人共 155 张
 func DealNextCard(gameID string) (*GameTable, bool, error) {
 	table, exists := activeGames[gameID]
 	if !exists {
@@ -317,42 +325,142 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 		return table, true, nil // 发牌已完成
 	}
 
-	// 计算当前已发了多少轮
-	currentRound := table.DealtCardCount
+	numPlayers := len(table.PlayerHands)
+	if numPlayers <= 0 {
+		numPlayers = 5
+	}
+	totalCards := numPlayers * table.TotalCardsPerPlayer
 
-	// 检查是否发完了（31轮）
-	if currentRound >= table.TotalCardsPerPlayer {
-		// 发牌完成，进入叫庄阶段
+	// 检查是否发完
+	if table.DealtCardCount >= totalCards {
 		table.DealingPhase = "finished"
 		table.Status = "calling"
-		table.CallPhase = "counting"
-		table.CallCountdown = 10 // 10秒倒计时（根据规则）
+		// 发完最后一张牌的瞬间处理倒计时/翻底（详见 rules/03-bidding.md §3.0 §3.1 §3.4）：
+		// - 发牌期间已有人亮庄(CallPhase=="counting" 且有 CallRecords)：启动 5 秒追加倒计时给反庄机会
+		// - 发牌期间所有人已按"不叫庄"(PassedSeats==totalPlayers 且无 CallRecords)：直接进入翻底阶段
+		// - 其它情况：启动 10 秒初始倒计时
+		hasCall := len(table.CallRecords) > 0
+		allPassed := len(table.PassedSeats) == numPlayers
+		switch {
+		case !hasCall && allPassed:
+			table.CallPhase = "flipping"
+			table.CallCountdown = 0
+			table.FlipStartedAt = time.Now()
+		case hasCall:
+			table.CallPhase = "counting"
+			if table.CallCountdown <= 0 {
+				table.CallCountdown = 5
+			}
+		default:
+			table.CallPhase = "counting"
+			table.CallCountdown = 10
+		}
 		table.UpdatedAt = time.Now()
 		activeGames[gameID] = table
 
-		log.Printf("[DealNextCard] Dealing complete for game %s, entering calling phase", gameID)
+		// 单人模式：发牌完成后自动为人类玩家亮级牌（如果有的话）
+		// TODO: 临时禁用，用于测试倒计时→翻底牌流程
+		// if isSinglePlayerGame(table) {
+		// 	autoCallForHumanIfPossible(table, gameID)
+		// }
+
+		log.Printf("[DealNextCard] Dealing complete for game %s, entering calling phase (countdown=%d, phase=%s)",
+			gameID, table.CallCountdown, table.CallPhase)
 		return table, true, nil
 	}
 
-	// 给每个玩家发一张牌（第currentRound轮，每人发第currentRound张牌）
-	for seat := 1; seat <= 5; seat++ {
-		cardIndex := currentRound*5 + (seat - 1) // 计算牌在DealingCards中的索引
-		if cardIndex < len(table.DealingCards) {
-			card := table.DealingCards[cardIndex]
-			if hand, ok := table.PlayerHands[seat]; ok {
-				hand.Cards = append(hand.Cards, card)
-			}
+	// 计算这一张应该发给哪个座位（逆时针）
+	// 逆时针在座位 1..numPlayers 中：next = ((seat - 2 + numPlayers) % numPlayers) + 1
+	// 即 1→5→4→3→2→1...（5人桌）
+	seat := table.StartingDealerSeat
+	if seat <= 0 {
+		seat = 1
+	}
+	step := table.DealtCardCount % numPlayers
+	for k := 0; k < step; k++ {
+		seat = ((seat - 2 + numPlayers) % numPlayers) + 1
+	}
+
+	// 取下一张待发的牌
+	cardIndex := table.DealtCardCount
+	if cardIndex < len(table.DealingCards) {
+		card := table.DealingCards[cardIndex]
+		if hand, ok := table.PlayerHands[seat]; ok {
+			hand.Cards = append(hand.Cards, card)
 		}
 	}
 
-	table.DealtCardCount = currentRound + 1
+	table.DealtCardCount++
+	table.LastDealtSeat = seat
 	table.UpdatedAt = time.Now()
 	activeGames[gameID] = table
 
-	log.Printf("[DealNextCard] Round %d complete for game %s, each player now has %d cards",
-		table.DealtCardCount, gameID, table.DealtCardCount)
+	log.Printf("[DealNextCard] game=%s dealt card #%d to seat %d", gameID, table.DealtCardCount, seat)
+
+	// 发完最后一张牌后立即触发完成逻辑
+	if table.DealtCardCount >= totalCards {
+		table.DealingPhase = "finished"
+		table.Status = "calling"
+		hasCall := len(table.CallRecords) > 0
+		allPassed := len(table.PassedSeats) == numPlayers
+		switch {
+		case !hasCall && allPassed:
+			table.CallPhase = "flipping"
+			table.CallCountdown = 0
+			table.FlipStartedAt = time.Now()
+		case hasCall:
+			table.CallPhase = "counting"
+			if table.CallCountdown <= 0 {
+				table.CallCountdown = 5
+			}
+		default:
+			table.CallPhase = "counting"
+			table.CallCountdown = 10
+		}
+		table.UpdatedAt = time.Now()
+		activeGames[gameID] = table
+
+		// 单人模式：发牌完成后自动为人类玩家亮级牌（如果有的话）
+		// TODO: 临时禁用，用于测试倒计时→翻底牌流程
+		// if isSinglePlayerGame(table) {
+		// 	autoCallForHumanIfPossible(table, gameID)
+		// }
+
+		log.Printf("[DealNextCard] Dealing complete for game %s, entering calling phase (countdown=%d, phase=%s)",
+			gameID, table.CallCountdown, table.CallPhase)
+		return table, true, nil
+	}
 
 	return table, false, nil
+}
+
+// autoCallForHumanIfPossible 单人模式发牌完成后，自动为人类玩家亮级牌
+func autoCallForHumanIfPossible(table *GameTable, gameID string) {
+	playerHand := table.PlayerHands[1]
+	if playerHand == nil {
+		return
+	}
+	rankCards := findRankCards(playerHand.Cards, table.CurrentLevel)
+	if len(rankCards) == 0 {
+		return
+	}
+	suitCounts := make(map[string][]int)
+	for idx, card := range playerHand.Cards {
+		if card.Value == table.CurrentLevel {
+			suitCounts[card.Suit] = append(suitCounts[card.Suit], idx)
+		}
+	}
+	var bestSuit string
+	var bestIndices []int
+	for suit, indices := range suitCounts {
+		if len(indices) > len(bestIndices) {
+			bestSuit = suit
+			bestIndices = indices
+		}
+	}
+	if len(bestIndices) > 0 {
+		CallDealer(gameID, playerHand.UserID, bestSuit, bestIndices[:1])
+	}
 }
 
 // GetTableGame retrieves the active game table
@@ -377,8 +485,10 @@ func GetTableGame(gameID string) (*GameTable, error) {
 	}
 
 	// 自动递减倒计时（基于UpdatedAt时间戳）
-	// 在叫庄阶段，无论有没有人叫庄都应该倒计时
-	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown > 0 {
+	// 规则（rules/03-bidding.md §3.0）：发牌期间 (DealingPhase=="dealing") 不倒计时，
+	// 只有当 Status=="calling" 且 CallPhase=="counting" 时才走倒计时。
+	inBiddingWindow := table.Status == "calling" && table.CallPhase == "counting"
+	if inBiddingWindow && table.CallCountdown > 0 {
 		elapsed := int(time.Since(table.UpdatedAt).Seconds())
 		if elapsed > 0 {
 			table.CallCountdown -= elapsed
@@ -388,45 +498,85 @@ func GetTableGame(gameID string) (*GameTable, error) {
 			table.UpdatedAt = time.Now()
 			// 更新内存中的倒计时
 			activeGames[gameID] = table
-			log.Printf("[GetTableGame] Countdown updated: %d seconds remaining", table.CallCountdown)
+			log.Printf("[GetTableGame] Countdown updated: %d seconds remaining (status=%s, phase=%s)",
+				table.CallCountdown, table.Status, table.CallPhase)
 		}
 	}
 
-	// 当倒计时为0且有人叫庄时，自动确定庄家
-	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown <= 0 && len(table.CallRecords) > 0 {
-		// 有人叫庄，倒计时结束，确定庄家
-		lastCall := table.CallRecords[len(table.CallRecords)-1]
-		table.DealerSeat = lastCall.Seat
-		table.HostID = table.PlayerHands[lastCall.Seat].UserID
-		table.TrumpSuit = lastCall.Suit
-		table.TrumpRank = lastCall.Rank
-		table.CallPhase = "finished"
-		log.Printf("[GetTableGame] Countdown ended, dealer confirmed: seat=%d, trumpSuit=%s, trumpRank=%s",
-			table.DealerSeat, table.TrumpSuit, table.TrumpRank)
+	// 自动翻底牌（按每 3 秒一张推算，详见 rules/03-bidding.md §3.4）
+	// 当 CallPhase=="flipping" 时，根据 FlipStartedAt 推算应当翻开多少张，
+	// 缺多少张就在这里补翻几次（中途翻到级牌即停止）。
+	if table.Status == "calling" && table.CallPhase == "flipping" {
+		if table.FlipStartedAt.IsZero() {
+			table.FlipStartedAt = time.Now()
+		}
+		elapsedSec := int(time.Since(table.FlipStartedAt).Seconds())
+		expectedFlipped := elapsedSec/flipBottomCardIntervalSec + 1 // 进入 flipping 立刻翻第一张
+		if expectedFlipped > len(table.BottomCards) {
+			expectedFlipped = len(table.BottomCards)
+		}
+		for len(table.FlippedBottomCards) < expectedFlipped && table.CallPhase == "flipping" {
+			updated, err := flipNextBottomCardCore(table, gameID)
+			if err != nil {
+				break
+			}
+			table = updated
+		}
+		activeGames[gameID] = table
+	}
 
-		// 记录确定庄家的日志
-		LogGameAction(GameActionLogRequest{
-			GameID:     gameID,
-			ActionType: "dealer_confirmed",
-			PlayerSeat: 0,
-			PlayerID:   "",
-			ActionData: map[string]interface{}{
-				"reason": "countdown_ended",
-			},
-			ResultData: map[string]interface{}{
-				"dealer_seat": table.DealerSeat,
-				"trump_suit":  table.TrumpSuit,
-				"trump_rank":  table.TrumpRank,
-			},
-		})
-
-		// 确认庄家后，进入下一阶段
-		if isSinglePlayerGame(table) {
+	// finished 阶段保留 3 秒：留给前端最后一张翻牌动画 + 定庄结果短暂展示，
+	// 然后 tick 推进到 discarding（call_records 路径下 finalize 已立即执行，此处只处理 flipping → finished 的等待）。
+	if table.Status == "calling" && table.CallPhase == "finished" {
+		if time.Since(table.UpdatedAt) >= 3*time.Second {
+			log.Printf("[GetTableGame] finished phase elapsed >= 3s, finalize and start playing")
 			return finalizeDealerAndStartPlaying(table)
 		}
+	}
 
-		// 多人模式：也进入找朋友阶段
-		return finalizeDealerAndStartPlaying(table)
+	// 当倒计时为0且有人亮庄时，自动确定庄家
+	// 注意：只有在发牌已完成（Status=="calling"）时才确定庄家；
+	// 发牌期间倒计时归零仍要等牌发完再处理，避免提前结束流程
+	if table.Status == "calling" && table.CallPhase == "counting" && table.CallCountdown <= 0 {
+		if len(table.CallRecords) > 0 {
+			// 有人亮庄，倒计时结束，确定庄家
+			lastCall := table.CallRecords[len(table.CallRecords)-1]
+			table.DealerSeat = lastCall.Seat
+			table.HostID = table.PlayerHands[lastCall.Seat].UserID
+			table.TrumpSuit = lastCall.Suit
+			table.TrumpRank = lastCall.Rank
+			table.CallPhase = "finished"
+			log.Printf("[GetTableGame] Countdown ended, dealer confirmed: seat=%d, trumpSuit=%s, trumpRank=%s",
+				table.DealerSeat, table.TrumpSuit, table.TrumpRank)
+
+			// 记录确定庄家的日志
+			LogGameAction(GameActionLogRequest{
+				GameID:     gameID,
+				ActionType: "dealer_confirmed",
+				PlayerSeat: 0,
+				PlayerID:   "",
+				ActionData: map[string]interface{}{
+					"reason": "countdown_ended",
+				},
+				ResultData: map[string]interface{}{
+					"dealer_seat": table.DealerSeat,
+					"trump_suit":  table.TrumpSuit,
+					"trump_rank":  table.TrumpRank,
+				},
+			})
+
+			// 确认庄家后，进入 finished 阶段并停留 3 秒（与翻底定庄结果展示节奏一致），
+			// 再由下次 GetTableGame tick 调用 finalizeDealerAndStartPlaying。
+			table.UpdatedAt = time.Now()
+			activeGames[gameID] = table
+			return table, nil
+		}
+
+		// 无人亮庄，倒计时结束，进入翻底牌阶段
+		table.CallPhase = "flipping"
+		table.FlipStartedAt = time.Now()
+		log.Printf("[GetTableGame] Countdown ended with no caller, entering flipping phase")
+		activeGames[gameID] = table
 	}
 
 	return table, nil
@@ -1137,44 +1287,51 @@ func StartSinglePlayerGame(gameID, hostID string) (*GameTable, error) {
 		return nil, fmt.Errorf("game already started")
 	}
 
-	// Deal cards
-	hands, bottomCards := DealCards(5)
+	// 创建并洗好牌（3副牌），按规则切片：5*31=155 张发给玩家，剩 7 张作底牌
+	allCards := createShuffledDeck()
+	const cardsToDeal = 5 * 31
+	bottomCards := allCards[cardsToDeal : cardsToDeal+7]
+	dealingCards := allCards[0:cardsToDeal]
 
 	// 单人模式：玩家1是庄家（起始发牌人）
 	startingDealer := 1
 
-	// Initialize game table
+	// Initialize game table —— 进入发牌阶段（逐张发牌，1秒1张）
 	table := &GameTable{
-		GameID:             gameID,
-		HostID:             hostID,
-		Status:             "calling", // 进入抢庄阶段
-		CurrentLevel:       game.CurrentLevel,
-		TrumpSuit:          "",
-		HostCalledCard:     nil,
-		FriendRevealed:     false,
-		BottomCards:        bottomCards,
-		CurrentPlayer:      startingDealer,
-		TrickLeader:        startingDealer,
-		CurrentTrick:       make([]PlayedCard, 0),
-		TricksWon:          make([][]Card, 0),
-		PlayerHands:        make(map[int]*PlayerHand),
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-		StartingDealerSeat: startingDealer,
-		CurrentCaller:      startingDealer,
-		CallPhase:          "counting",
-		CallCountdown:      10,
-		TrumpRank:          game.CurrentLevel,
-		FlippedBottomCards: make([]Card, 0),
-		CallRecords:        make([]CallRecord, 0),
+		GameID:              gameID,
+		HostID:              hostID,
+		Status:              "dealing", // 发牌阶段
+		CurrentLevel:        game.CurrentLevel,
+		TrumpSuit:           "",
+		HostCalledCard:      nil,
+		FriendRevealed:      false,
+		BottomCards:         bottomCards,
+		CurrentPlayer:       startingDealer,
+		TrickLeader:         startingDealer,
+		CurrentTrick:        make([]PlayedCard, 0),
+		TricksWon:           make([][]Card, 0),
+		PlayerHands:         make(map[int]*PlayerHand),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
+		StartingDealerSeat:  startingDealer,
+		CurrentCaller:       startingDealer,
+		CallPhase:           "dealing", // 发牌中
+		CallCountdown:       0,         // 发牌期间不倒计时；发完最后一张才启动 10 秒
+		TrumpRank:           game.CurrentLevel,
+		FlippedBottomCards:  make([]Card, 0),
+		CallRecords:         make([]CallRecord, 0),
+		DealingPhase:        "dealing",
+		DealtCardCount:      0,
+		TotalCardsPerPlayer: 31,
+		DealingCards:        dealingCards,
 	}
 
-	// Assign cards to players (seat 1 is human, 2-5 are AI)
+	// 初始化玩家手牌为空（逐张发牌）
 	for i, playerID := range game.PlayerIDs {
 		seat := i + 1
 		table.PlayerHands[seat] = &PlayerHand{
 			UserID:     playerID,
-			Cards:      hands[i],
+			Cards:      make([]Card, 0),
 			SeatNumber: seat,
 			IsFriend:   false,
 			Score:      0,
@@ -1188,38 +1345,8 @@ func StartSinglePlayerGame(gameID, hostID string) (*GameTable, error) {
 	// Update game status in database
 	UpdateGameStatus(gameID, "playing")
 
-	// 单人模式：自动为玩家亮级牌（如果有的话）
-	// 检查玩家1（人类玩家）的手牌中是否有级牌
-	playerHand := table.PlayerHands[1]
-	if playerHand != nil {
-		rankCards := findRankCards(playerHand.Cards, game.CurrentLevel)
-		if len(rankCards) > 0 {
-			// 找到级牌最多的花色
-			suitCounts := make(map[string][]int) // suit -> card indices
-			for idx, card := range playerHand.Cards {
-				if card.Value == game.CurrentLevel {
-					suitCounts[card.Suit] = append(suitCounts[card.Suit], idx)
-				}
-			}
-
-			// 找到数量最多的花色
-			var bestSuit string
-			var bestIndices []int
-			for suit, indices := range suitCounts {
-				if len(indices) > len(bestIndices) {
-					bestSuit = suit
-					bestIndices = indices
-				}
-			}
-
-			// 自动叫庄
-			if len(bestIndices) > 0 {
-				// 只亮一张级牌（最少亮牌数量）
-				CallDealer(gameID, hostID, bestSuit, bestIndices[:1])
-			}
-		}
-	}
-
+	// 注意：发牌过程中前端会按 1 秒/张轮询 /deal-next，
+	// 发牌完成后 DealNextCard 内会自动为人类玩家亮级牌（见 autoCallForHumanIfPossible）。
 	return table, nil
 }
 
@@ -1560,7 +1687,7 @@ func NextRound(gameID string) (*GameTable, error) {
 	table.TricksWon = make([][]Card, 0)
 	table.CurrentCaller = startingDealer
 	table.CallPhase = "dealing"
-	table.CallCountdown = 0
+	table.CallCountdown = 0 // 发牌期间不倒计时；发完最后一张才启动 10 秒
 	table.CallRecords = make([]CallRecord, 0)
 	table.PassedSeats = make([]int, 0)
 	table.FlippedBottomCards = make([]Card, 0)
@@ -3596,11 +3723,11 @@ func validateSingleSuitFollow(cards []Card, leadSuit string, trumpRank string) e
 	return nil
 }
 
-// ==================== 抢庄相关函数 ====================
+// ==================== 亮庄/反庄相关函数 ====================
 
-// CallDealer handles a player calling for dealer (抢庄)
-// 玩家用级牌叫庄，决定主牌花色
-// 允许在发牌阶段(dealing)和叫庄阶段(calling)抢庄
+// CallDealer 玩家亮庄/反庄
+// 用级牌亮庄决定主牌花色；详见 rules/03-bidding.md §3.2 §3.3
+// 允许在发牌阶段(dealing)和倒计时阶段(calling)亮庄
 func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTable, error) {
 	lock := getGameLock(gameID)
 	lock.Lock()
@@ -3611,9 +3738,9 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		return nil, err
 	}
 
-	// 允许在发牌阶段或叫庄阶段抢庄
+	// 允许在发牌阶段或倒计时阶段亮庄
 	if table.Status != "calling" && table.Status != "dealing" {
-		return nil, fmt.Errorf("游戏不在叫庄或发牌阶段")
+		return nil, fmt.Errorf("游戏不在亮庄或发牌阶段")
 	}
 
 	// Find player's seat
@@ -3631,22 +3758,22 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		return nil, fmt.Errorf("玩家不在游戏中")
 	}
 
-	// 允许在发牌阶段或倒计时阶段抢庄
+	// 允许在发牌阶段或倒计时阶段亮庄
 	if table.CallPhase != "counting" && table.CallPhase != "dealing" {
-		return nil, fmt.Errorf("不在叫庄倒计时或发牌阶段")
+		return nil, fmt.Errorf("不在亮庄倒计时或发牌阶段")
 	}
 
-	// 检查玩家是否已经叫过庄
+	// 检查玩家是否已经亮过庄
 	for _, record := range table.CallRecords {
 		if record.Seat == playerSeat {
-			return nil, fmt.Errorf("你已经叫过庄了")
+			return nil, fmt.Errorf("你已经亮过庄了")
 		}
 	}
 
-	// 检查玩家是否已经选择不叫
+	// 检查玩家是否已经选择不叫庄
 	for _, seat := range table.PassedSeats {
 		if seat == playerSeat {
-			return nil, fmt.Errorf("你已经选择不叫")
+			return nil, fmt.Errorf("你已经选择不叫庄")
 		}
 	}
 
@@ -3791,12 +3918,19 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		table.TrumpRank = rank
 	}
 
-	// 有人叫庄后，重置倒计时为5秒，让其他玩家有机会反庄
-	// 不要立即设置为finished
-	table.CallCountdown = 5
-	table.CallPhase = "counting" // 确保仍在倒计时状态，允许反庄
+	// 亮庄/反庄成功后的倒计时处理（详见 rules/03-bidding.md §3.0 §3.1）：
+	// - 发牌期间(DealingPhase=="dealing")：不启动倒计时，CallCountdown 保持 0，
+	//   等发完最后一张牌后由 DealNextCard 统一启动 10 秒初始倒计时。
+	// - 发牌完成后(DealingPhase=="finished")：在初始/追加倒计时内发生亮庄/反庄，
+	//   倒计时刷新为 5 秒，给其他玩家反庄机会。
+	table.CallPhase = "counting" // 标记已有人亮庄，等待可能的反庄
+	if table.DealingPhase == "finished" {
+		table.CallCountdown = 5
+	} else {
+		table.CallCountdown = 0
+	}
 
-	// 记录抢庄日志
+	// 记录亮庄日志
 	LogGameAction(GameActionLogRequest{
 		GameID:     gameID,
 		ActionType: "call_dealer",
@@ -3826,8 +3960,12 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		if !aiCountered {
 			return finalizeDealerAndStartPlaying(table)
 		}
-		// 如果有AI反庄，重置倒计时，让其他AI也有机会反庄
-		table.CallCountdown = 3
+		// 如果有AI反庄，给其他AI反庄机会（发牌期间不启动倒计时；详见 rules/03-bidding.md §3.0）
+		if table.DealingPhase == "finished" {
+			table.CallCountdown = 3
+		} else {
+			table.CallCountdown = 0
+		}
 	}
 
 	// 推进到下一个未行动的叫庄玩家
@@ -3842,8 +3980,8 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	return table, nil
 }
 
-// PassCall handles a player passing on calling for dealer (不叫)
-// 玩家选择不叫庄
+// PassCall 玩家选择"不叫庄"
+// 详见 rules/03-bidding.md §3.0 §3.1
 func PassCall(gameID, userID string) (*GameTable, error) {
 	lock := getGameLock(gameID)
 	lock.Lock()
@@ -3854,8 +3992,9 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 		return nil, err
 	}
 
-	if table.Status != "calling" {
-		return nil, fmt.Errorf("游戏不在叫庄阶段")
+	// 允许在发牌阶段或倒计时阶段不叫庄
+	if table.Status != "calling" && table.Status != "dealing" {
+		return nil, fmt.Errorf("游戏不在亮庄或发牌阶段")
 	}
 
 	// Find player's seat
@@ -3877,24 +4016,24 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 		return nil, fmt.Errorf("不在叫庄倒计时或发牌阶段")
 	}
 
-	// 检查玩家是否已经叫过庄
+	// 检查玩家是否已经亮过庄
 	for _, record := range table.CallRecords {
 		if record.Seat == playerSeat {
-			return nil, fmt.Errorf("你已经叫过庄了")
+			return nil, fmt.Errorf("你已经亮过庄了")
 		}
 	}
 
-	// 检查玩家是否已经选择不叫
+	// 检查玩家是否已经选择不叫庄
 	for _, seat := range table.PassedSeats {
 		if seat == playerSeat {
 			return nil, fmt.Errorf("you have already passed")
 		}
 	}
 
-	// 记录不叫
+	// 记录"不叫庄"
 	table.PassedSeats = append(table.PassedSeats, playerSeat)
 
-	// 记录不叫日志
+	// 记录不叫庄日志
 	LogGameAction(GameActionLogRequest{
 		GameID:     gameID,
 		ActionType: "pass_call",
@@ -3910,10 +4049,10 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 
 	totalPlayers := len(table.PlayerHands)
 
-	// 情况B：已有人叫庄，检查是否所有未叫庄的玩家都选择了不叫
+	// 情况B：已有人亮庄，检查是否所有未亮庄的玩家都选择了不叫庄
 	if len(table.CallRecords) > 0 {
-		// 已叫庄的玩家数 + 不叫的玩家数 == 总玩家数
-		// 说明所有人都做出了选择（叫庄或不叫）
+		// 已亮庄的玩家数 + 不叫庄的玩家数 == 总玩家数
+		// 说明所有人都做出了选择（亮庄或不叫庄）
 		if len(table.CallRecords)+len(table.PassedSeats) == totalPlayers {
 			// 确定最后叫庄的人为庄家
 			lastCall := table.CallRecords[len(table.CallRecords)-1]
@@ -3947,24 +4086,34 @@ func PassCall(gameID, userID string) (*GameTable, error) {
 		}
 	}
 
-	// 情况A：无人叫庄，检查是否所有人都不叫
+	// 情况A：无人亮庄，检查是否所有人都不叫庄
 	if len(table.CallRecords) == 0 && len(table.PassedSeats) == totalPlayers {
-		// 所有人都不叫，进入翻底牌阶段
-		table.CallPhase = "flipping"
+		// 规则（rules/03-bidding.md §3.0 §3.1）：
+		// - 翻底牌只能发生在"发完牌 + 初始倒计时归零 + 全程无人亮庄"三者都满足后。
+		// - 发牌期间(DealingPhase=="dealing")即便所有人都按了不叫庄，也要等发完最后一张牌、
+		//   倒计时启动并归零，才能进入 flipping。
+		// - 发牌完成后(DealingPhase=="finished")所有人按不叫庄 → 立刻结束倒计时，进入 flipping。
+		if table.DealingPhase == "finished" {
+			table.CallPhase = "flipping"
+			table.CallCountdown = 0
+			table.FlipStartedAt = time.Now()
 
-		// 记录进入翻底牌阶段的日志
-		LogGameAction(GameActionLogRequest{
-			GameID:     gameID,
-			ActionType: "enter_flipping_phase",
-			PlayerSeat: 0,
-			PlayerID:   "",
-			ActionData: map[string]interface{}{
-				"reason": "all_players_passed",
-			},
-			ResultData: map[string]interface{}{
-				"call_phase": "flipping",
-			},
-		})
+			LogGameAction(GameActionLogRequest{
+				GameID:     gameID,
+				ActionType: "enter_flipping_phase",
+				PlayerSeat: 0,
+				PlayerID:   "",
+				ActionData: map[string]interface{}{
+					"reason": "all_players_passed",
+				},
+				ResultData: map[string]interface{}{
+					"call_phase": "flipping",
+				},
+			})
+		}
+		// 发牌期间所有人 pass：保持 dealing 阶段不变，等发完牌后由 DealNextCard
+		// 把 CallPhase 切到 counting 并启动 10 秒倒计时，倒计时归零时再由
+		// CheckAndProcessCountdown 走到 flipping。
 	} else {
 		// 推进到下一个未行动的叫庄玩家
 		advanceCallingPlayer(table)
@@ -3988,16 +4137,18 @@ func CheckAndProcessCountdown(gameID string) (*GameTable, error) {
 		return nil, err
 	}
 
-	if table.Status != "calling" {
-		return table, nil // 不在叫庄阶段，直接返回
-	}
-
-	if table.CallPhase != "counting" {
-		return table, nil // 不在倒计时阶段，直接返回
+	// 规则（rules/03-bidding.md §3.0）：倒计时只在 Status=="calling" 且 CallPhase=="counting" 时生效
+	if table.Status != "calling" || table.CallPhase != "counting" {
+		return table, nil
 	}
 
 	// 倒计时还没结束
 	if table.CallCountdown > 0 {
+		return table, nil
+	}
+
+	// 兜底：发牌尚未完成时不处理（理论上 calling 阶段意味着已发完，但加保护）
+	if table.DealingPhase == "dealing" {
 		return table, nil
 	}
 
@@ -4032,8 +4183,9 @@ func CheckAndProcessCountdown(gameID string) (*GameTable, error) {
 		return table, nil
 	}
 
-	// 情况2：无人叫庄，进入翻底牌阶段
+	// 情况2：无人亮庄，进入翻底牌阶段
 	table.CallPhase = "flipping"
+	table.FlipStartedAt = time.Now()
 
 	// 记录进入翻底牌阶段的日志
 	LogGameAction(GameActionLogRequest{
@@ -4136,13 +4288,18 @@ func isSinglePlayerGame(table *GameTable) bool {
 }
 
 // FlipBottomCard handles flipping a card from the bottom to determine dealer
-// 翻底牌定庄
+// 翻底牌定庄（HTTP 兼容入口；现已主要由 GetTableGame tick 中按 3 秒/张自动驱动）
 func FlipBottomCard(gameID string) (*GameTable, error) {
 	table, err := GetTableGame(gameID)
 	if err != nil {
 		return nil, err
 	}
+	return flipNextBottomCardCore(table, gameID)
+}
 
+// flipNextBottomCardCore 翻开下一张底牌（无锁；调用方负责并发安全）
+// 翻牌规则详见 rules/03-bidding.md §3.4 §3.5
+func flipNextBottomCardCore(table *GameTable, gameID string) (*GameTable, error) {
 	if table.Status != "calling" {
 		return nil, fmt.Errorf("game not in calling phase")
 	}
@@ -4196,9 +4353,11 @@ func FlipBottomCard(gameID string) (*GameTable, error) {
 			table.DealerSeat = selectedSeat
 			table.TrumpSuit = nextCard.Suit
 			table.HostID = table.PlayerHands[selectedSeat].UserID
+			// 切到 finished：保留翻底牌画面 3 秒（让最后一张翻牌动画完整播放），
+			// 再由 GetTableGame tick 调用 finalizeDealerAndStartPlaying 推进到 discarding。
 			table.CallPhase = "finished"
-
-			return finalizeDealerAndStartPlaying(table)
+			table.UpdatedAt = time.Now()
+			return table, nil
 		}
 	}
 
@@ -4227,9 +4386,10 @@ func FlipBottomCard(gameID string) (*GameTable, error) {
 
 		table.TrumpSuit = trumpSuit
 		table.HostID = table.PlayerHands[table.StartingDealerSeat].UserID
+		// 切到 finished：同上，保留翻底牌画面 3 秒再 finalize。
 		table.CallPhase = "finished"
-
-		return finalizeDealerAndStartPlaying(table)
+		table.UpdatedAt = time.Now()
+		return table, nil
 	}
 
 	table.UpdatedAt = time.Now()

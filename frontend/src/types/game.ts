@@ -3,7 +3,7 @@ import type { ICard, ECardSuit } from './card';
 export enum EGameStatus {
   WAITING = 'waiting',
   DEALING = 'dealing',           // 发牌阶段
-  CALLING = 'calling',           // 叫庄阶段
+  CALLING = 'calling',           // 亮庄阶段
   CALLING_FRIEND = 'calling_friend', // 叫朋友阶段
   DISCARDING = 'discarding',     // 扣牌阶段
   PLAYING = 'playing',
@@ -47,7 +47,7 @@ export interface IGameState {
   trumpRank?: string; // 级牌点数
   bottomCards: ICard[];
   scores: Record<number, number>;
-  // 叫庄相关
+  // 亮庄/反庄相关
   dealerSeat?: number;
   callPhase?: string;
   callCountdown?: number;
@@ -68,6 +68,7 @@ export interface IGameState {
   dealtCardCount?: number;
   totalCardsPerPlayer?: number;
   dealingPhase?: string;
+  lastDealtSeat?: number;
   // 本局结算
   totalPoints?: number;   // 抓分方总得分
   roundResults?: IGameRoundResult[]; // 每个玩家的结算结果

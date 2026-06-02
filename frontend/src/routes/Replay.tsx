@@ -85,9 +85,9 @@ const getActionDescription = (action: TActionItem): string => {
     case 'deal_cards':
       return '发牌';
     case 'call_dealer':
-      return `叫庄: ${SUIT_SYMBOLS[action.actionData?.suit || ''] || ''}${action.actionData?.rank || ''} (${action.actionData?.count || 0}张)`;
+      return `亮庄: ${SUIT_SYMBOLS[action.actionData?.suit || ''] || ''}${action.actionData?.rank || ''} (${action.actionData?.count || 0}张)`;
     case 'pass_call':
-      return '不叫';
+      return '不叫庄';
     case 'dealer_confirmed':
       return `庄家确认: ${SUIT_SYMBOLS[action.resultData?.trump_suit as string || ''] || ''}${action.resultData?.trump_rank || ''}`;
     case 'call_friend':
@@ -226,7 +226,7 @@ export default function Replay() {
 
   const categoryNames: Record<string, string> = {
     setup: '游戏设置',
-    calling: '叫庄阶段',
+    calling: '亮庄阶段',
     friend: '叫朋友',
     discard: '扣牌',
     playing: '出牌记录',

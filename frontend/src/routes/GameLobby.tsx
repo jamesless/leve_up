@@ -24,7 +24,7 @@ interface GameRoom {
 
 const statusLabels: Record<string, string> = {
   waiting: '等待中',
-  calling: '抢庄中',
+  calling: '亮庄中',
   calling_friend: '叫朋友中',
   discarding: '扣牌中',
   playing: '游戏中',

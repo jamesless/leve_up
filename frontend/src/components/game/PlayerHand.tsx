@@ -40,11 +40,12 @@ export default function PlayerHand({
   // 理牌函数：主牌单独放一堆，其他牌红黑交错
   const sortCards = (cards: ICard[]): ICard[] => {
     // 判断是否是主牌
+    // 注意：发牌阶段 trumpSuit 尚未确定，但 trumpRank 已知，
+    // 此时仍把"级牌 + 大小王"视作 trump，保证手牌从一开始就理好
     const isTrumpCard = (card: ICard): boolean => {
-      if (!trumpSuit || !trumpRank) return false;
       if (card.suit === 'joker') return true;
-      if (card.value === trumpRank) return true;
-      if (card.suit === trumpSuit) return true;
+      if (trumpRank && card.value === trumpRank) return true;
+      if (trumpSuit && card.suit === trumpSuit) return true;
       return false;
     };
 
@@ -106,9 +107,10 @@ export default function PlayerHand({
   };
 
   // 排序后的手牌（用于显示），保持原始索引用于选牌
-  const sortedCards = useMemo(() => sortCards(cards), [cards]);
+  // 依赖 cards / trumpSuit / trumpRank：发牌阶段每来一张新牌都会重新捋
+  const sortedCards = useMemo(() => sortCards(cards), [cards, trumpSuit, trumpRank]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 判断是否是主牌（叫庄结束后）
+  // 判断是否是主牌（亮庄结束后）
   const isTrumpCard = (card: ICard) => {
     if (!trumpSuit || !trumpRank) return false;
     if (card.suit === 'joker') return true;
@@ -144,7 +146,7 @@ export default function PlayerHand({
     return groups;
   }, [sortedCards, trumpSuit, trumpRank]);
 
-  const [activeTab, setActiveTab] = useState('trump');
+  const [activeTab, setActiveTab] = useState('all');
 
   // 创建排序后索引到原始索引的映射
   const sortedToOriginalIndex = useMemo(() => {
@@ -164,13 +166,13 @@ export default function PlayerHand({
     return trumpRank ? card.value === trumpRank : false;
   };
 
-  // 判断是否显示级牌高亮（叫庄阶段）
+  // 判断是否显示级牌高亮（亮庄阶段）
   const shouldHighlightTrumpRank = (card: ICard): boolean => {
     if (gameStatus !== 'calling') return false;
     return isTrumpRankCard(card);
   };
 
-  // 判断是否显示对方级牌高亮（叫庄阶段）
+  // 判断是否显示对方级牌高亮（亮庄阶段）
   const shouldHighlightOtherTrumpRank = (card: ICard): boolean => {
     if (gameStatus !== 'calling') return false;
     if (!otherCalledRank) return false;
@@ -180,7 +182,7 @@ export default function PlayerHand({
 
   // 获取主牌类型
   const getTrumpType = (card: ICard): 'mine' | 'other' | 'confirmed' | undefined => {
-    // 叫庄阶段
+    // 亮庄阶段
     if (gameStatus === 'calling') {
       if (isTrumpRankCard(card) && myCalledRank) {
         return 'mine'; // 自己的级牌
@@ -189,7 +191,7 @@ export default function PlayerHand({
         return 'other'; // 对方的级牌
       }
     }
-    // 叫庄结束后，所有主牌
+    // 亮庄结束后，所有主牌
     if (gameStatus !== 'calling' && gameStatus !== 'waiting') {
       if (isTrumpCard(card)) {
         return 'confirmed';
@@ -198,16 +200,16 @@ export default function PlayerHand({
     return undefined;
   };
 
-  // 判断是否显示主牌高亮（叫庄结束后）
+  // 判断是否显示主牌高亮（亮庄结束后）
   const shouldHighlightTrump = (card: ICard) => {
-    // 叫庄阶段结束后才高亮主牌
+    // 亮庄阶段结束后才高亮主牌
     if (gameStatus === 'calling' || gameStatus === 'waiting') return false;
     return isTrumpCard(card);
   };
 
   // 判断卡片是否可用
   const isCardDisabled = (_index: number): boolean => {
-    //：所有玩家都可以 叫庄阶段选择级牌
+    //：所有玩家都可以 亮庄阶段选择级牌
     if (gameStatus === 'calling') return false;
     // 出牌阶段暂时不限制，任何牌都可以出
     return false;

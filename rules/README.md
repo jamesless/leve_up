@@ -8,7 +8,7 @@
 |------|------|-----------|
 | [01-basic-info.md](01-basic-info.md) | 基础信息 | 4 |
 | [02-dealing.md](02-dealing.md) | 发牌规则 | 8 |
-| [03-bidding.md](03-bidding.md) | 抢庄、亮主、反主规则 | 15 |
+| [03-bidding.md](03-bidding.md) | 亮庄、反庄规则 | 17 |
 | [04-dealer-flow.md](04-dealer-flow.md) | 庄家流程 | 16 |
 | [05-playing.md](05-playing.md) | 出牌规则 | 22 |
 | [06-scoring.md](06-scoring.md) | 抠底与底牌分计算 | 13 |

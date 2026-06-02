@@ -45,7 +45,7 @@ export function useGameTable(gameId: string) {
   return useQuery({
     queryKey: ['gameTable', gameId],
     queryFn: () => gameService.getGameTable(gameId),
-    refetchInterval: 3000,
+    refetchInterval: 1000,
     enabled: Boolean(gameId),
   });
 }

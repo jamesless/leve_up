@@ -22,12 +22,12 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/40 glass backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+      <div className="mx-auto flex h-10 max-w-6xl items-center justify-between px-3">
         {/* Logo with Glassmorphism - Coordinated Colors */}
-        <Link to="/" className="flex items-center gap-2 font-display text-xl font-bold group">
+        <Link to="/" className="flex items-center gap-1.5 font-display text-base font-bold group leading-none">
           <div className="relative">
-            <Spade className="h-6 w-6 text-primary transition-transform group-hover:scale-110" />
-            <div className="absolute inset-0 blur-lg bg-primary/20 group-hover:bg-primary/30 transition-all" />
+            <Spade className="h-4 w-4 text-primary transition-transform group-hover:scale-110" />
+            <div className="absolute inset-0 blur-md bg-primary/20 group-hover:bg-primary/30 transition-all" />
           </div>
           <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent">
             升级
@@ -35,15 +35,15 @@ export default function Header() {
         </Link>
 
         {/* Navigation Links - Glass Style */}
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-0.5 md:flex">
           {NAV_LINKS.map(({ to, label }) => (
             <Link
               key={to}
               to={to}
               className={cn(
-                'rounded-xl px-4 py-2 text-sm font-semibold transition-all',
+                'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
                 location.pathname === to
-                  ? 'glass-card text-foreground shadow-md'
+                  ? 'glass-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:glass',
               )}
             >
@@ -53,10 +53,10 @@ export default function Header() {
         </nav>
 
         {/* Auth Buttons - Glassmorphism Style */}
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-1.5 md:flex">
           {isAuthenticated && user ? (
             <>
-              <span className="text-sm font-medium glass-light px-4 py-2 rounded-full border border-white/20">
+              <span className="text-[11px] font-medium glass-light px-2 py-0.5 rounded-full border border-white/20 leading-none">
                 {user.username}
               </span>
               <Button
@@ -64,19 +64,19 @@ export default function Header() {
                 size="sm"
                 onClick={() => logoutMutation.mutate()}
                 disabled={logoutMutation.isPending}
-                className="glass-card hover:glass-strong"
+                className="h-7 px-2 text-xs glass-card hover:glass-strong"
               >
-                <LogOut className="mr-1 h-4 w-4" />
+                <LogOut className="mr-1 h-3.5 w-3.5" />
                 退出
               </Button>
             </>
           ) : (
             <>
               <Link to="/login">
-                <Button variant="ghost" size="sm" className="glass-card hover:glass-strong">登录</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs glass-card hover:glass-strong">登录</Button>
               </Link>
               <Link to="/register">
-                <Button size="sm" className="glass-strong bg-gradient-to-r from-primary/80 to-accent/80 hover:from-primary hover:to-accent text-white border-2 border-white/30">注册</Button>
+                <Button size="sm" className="h-7 px-2 text-xs glass-strong bg-gradient-to-r from-primary/80 to-accent/80 hover:from-primary hover:to-accent text-white border-2 border-white/30">注册</Button>
               </Link>
             </>
           )}
@@ -85,10 +85,10 @@ export default function Header() {
         <Button
           variant="ghost"
           size="icon"
-          className="md:hidden"
+          className="md:hidden h-7 w-7"
           onClick={() => setMobileOpen(!mobileOpen)}
         >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
         </Button>
       </div>
 

@@ -394,7 +394,7 @@ func StartGameHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
-		"message": "游戏开始，请抢庄",
+		"message": "游戏开始，请亮庄",
 	})
 }
 
@@ -493,7 +493,7 @@ func CallFriendHandler(c *gin.Context) {
 	})
 }
 
-// CallDealerHandler handles a player calling for dealer (抢庄)
+// CallDealerHandler 处理玩家亮庄/反庄请求
 func CallDealerHandler(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
 	gameID := c.Param("id")
@@ -545,7 +545,7 @@ func CallDealerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
-		"message": "抢庄成功",
+		"message": "亮庄成功",
 	})
 }
 
@@ -1081,6 +1081,7 @@ func GetGameTableHandler(c *gin.Context) {
 		"trumpSuit":          trumpSuit,
 		"trumpRank":          table.TrumpRank,
 		"bottomCards":        table.BottomCards,
+		"flippedBottomCards": table.FlippedBottomCards,
 		"scores":             scores,
 		"dealerSeat":         table.DealerSeat,
 		"callRecords":        table.CallRecords,
@@ -1097,6 +1098,11 @@ func GetGameTableHandler(c *gin.Context) {
 		"totalPoints":             table.TotalPoints,
 		"roundResults":            table.RoundResults,
 		"nextRoundCountdownStart": table.NextRoundCountdownStart,
+		// 发牌阶段进度（供前端动画使用）
+		"dealtCardCount":      table.DealtCardCount,
+		"totalCardsPerPlayer": table.TotalCardsPerPlayer,
+		"dealingPhase":        table.DealingPhase,
+		"lastDealtSeat":       table.LastDealtSeat,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
