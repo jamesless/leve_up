@@ -534,6 +534,16 @@ func GetTableGame(gameID string) (*GameTable, error) {
 		}
 	}
 
+	// 扣底牌阶段：懒加载地把底牌并入庄家手牌。
+	// 此处而非 finalizeDealerAndStartPlaying 中合入，是为了让前端在
+	// "定庄成功"展示窗口（仍处于 calling/finished）期间看到的庄家手牌保持 31 张，
+	// 只有真正进入 discarding 阶段后下一次 GetTableGame 才返回 38 张，
+	// 即手牌区只有在扣底牌阶段才会出现底牌。
+	if table.Status == "discarding" {
+		ensureDealerHasBottomCards(table)
+		activeGames[gameID] = table
+	}
+
 	// 当倒计时为0且有人亮庄时，自动确定庄家
 	// 注意：只有在发牌已完成（Status=="calling"）时才确定庄家；
 	// 发牌期间倒计时归零仍要等牌发完再处理，避免提前结束流程
@@ -3956,15 +3966,23 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	if isSinglePlayerGame(table) {
 		// 检查AI是否可以反庄
 		aiCountered := tryAICounterCall(table, gameID)
-		// 如果没有AI反庄，直接进入找朋友阶段
+		// 如果没有AI反庄：
+		// - 发牌完成后(DealingPhase=="finished")：直接进入找朋友阶段
+		// - 发牌期间(DealingPhase=="dealing")：保持发牌节奏，不可中断发牌，
+		//   等 DealNextCard 发完最后一张后再由 GetTableGame tick 处理 finalize
 		if !aiCountered {
-			return finalizeDealerAndStartPlaying(table)
-		}
-		// 如果有AI反庄，给其他AI反庄机会（发牌期间不启动倒计时；详见 rules/03-bidding.md §3.0）
-		if table.DealingPhase == "finished" {
-			table.CallCountdown = 3
-		} else {
+			if table.DealingPhase == "finished" {
+				return finalizeDealerAndStartPlaying(table)
+			}
+			// 发牌期间：仅记录已亮庄，等待发牌完成；CallCountdown 保持 0
 			table.CallCountdown = 0
+		} else {
+			// 如果有AI反庄，给其他AI反庄机会（发牌期间不启动倒计时；详见 rules/03-bidding.md §3.0）
+			if table.DealingPhase == "finished" {
+				table.CallCountdown = 3
+			} else {
+				table.CallCountdown = 0
+			}
 		}
 	}
 
@@ -4420,18 +4438,36 @@ func findClosestSeatCounterClockwise(startingSeat int, candidates []int) int {
 	return candidates[0]
 }
 
+// ensureDealerHasBottomCards 幂等地把底牌追加到庄家手牌中。
+// 仅当庄家手牌尚未包含底牌（即数量等于发牌数量 31）时才追加，避免重复合入。
+// 该函数被设计为"懒加载"步骤：进入扣底牌阶段（Status=="discarding"）后，
+// 在 GetTableGame 或 DiscardBottomCards 等入口处按需调用，使前端在
+// "定庄成功"展示窗口（仍处于 calling/finished）期间看到的庄家手牌保持 31 张，
+// 只有真正进入扣底牌阶段后才显示 38 张。
+func ensureDealerHasBottomCards(table *GameTable) {
+	if table == nil || table.DealerSeat == 0 {
+		return
+	}
+	dealerHand, ok := table.PlayerHands[table.DealerSeat]
+	if !ok || dealerHand == nil {
+		return
+	}
+	// 已经包含底牌（38 张）或底牌为空时无需处理
+	if len(dealerHand.Cards) != 31 || len(table.BottomCards) == 0 {
+		return
+	}
+	for _, card := range table.BottomCards {
+		dealerHand.Cards = append(dealerHand.Cards, card)
+	}
+}
+
 // finalizeDealerAndStartPlaying finalizes dealer selection and starts the playing phase
 func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
-	// 庄家收取底牌
-	if dealerHand, ok := table.PlayerHands[table.DealerSeat]; ok {
-		// 将底牌加入庄家手牌（后续需要扣回7张）
-		for _, card := range table.BottomCards {
-			dealerHand.Cards = append(dealerHand.Cards, card)
-		}
-	}
-
 	// 规则4.1-4.2：庄家流程
-	// 1. 拿底牌（上面已完成）
+	// 1. 拿底牌：不在此处把底牌并入庄家手牌，避免在"定庄成功"展示窗口（仍处于
+	//    Status=="calling" / CallPhase=="finished"）期间前端就看到庄家手牌
+	//    多了 7 张。底牌将在 GetTableGame 进入 discarding 阶段时
+	//    通过 ensureDealerHasBottomCards 懒加载并入庄家手牌。
 	// 2. 扣回底牌（先扣7张牌）
 	// 3. 叫朋友（扣牌完成后进行）
 	table.Status = "discarding"
@@ -4440,6 +4476,8 @@ func finalizeDealerAndStartPlaying(table *GameTable) (*GameTable, error) {
 
 	// 单人模式：如果庄家是AI，自动扣底并叫朋友
 	if isSinglePlayerGame(table) && table.DealerSeat != 1 {
+		// AI 庄家自动扣底前需要先把底牌并入手牌，使其能从 38 张里选 7 张扣回。
+		ensureDealerHasBottomCards(table)
 		// AI庄家自动扣底：选择最小的7张牌
 		dealerHand, ok := table.PlayerHands[table.DealerSeat]
 		if ok && dealerHand != nil && len(dealerHand.Cards) == 38 {
@@ -4508,6 +4546,10 @@ func DiscardBottomCards(gameID string, userID string, cardIndices []int) (*GameT
 	if table.Status != "calling_friend" && table.Status != "discarding" {
 		return nil, fmt.Errorf("game not in calling_friend phase, current status: %s", table.Status)
 	}
+
+	// 兜底：底牌已经在 GetTableGame 进入 discarding 时懒加载并入庄家手牌；
+	// 此处再幂等地确保一次，以防客户端直接调用本接口绕过 GetTableGame。
+	ensureDealerHasBottomCards(table)
 
 	// 验证只有庄家可以扣牌
 	dealerHand, ok := table.PlayerHands[table.DealerSeat]

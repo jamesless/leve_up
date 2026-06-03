@@ -94,6 +94,12 @@ const game = data?.game;
     }, [game]);
 
     // 翻底牌定庄完成后无需独立公告：级牌与底牌已合并到"扣底牌"对话框内统一展示。
+    //
+    // 定庄成功展示时长（毫秒）：从 dealerConfirmedAt 起，在此时间内保留"✓ 定庄成功"提示。
+    // 过期后翻牌画面整体淡出消失，由上浮的扣牌对话框接管。
+    const DEALER_CONFIRM_SHOW_MS = 1500;
+    // 翻牌→定庄成功→扣牌之间的淡出过渡时长（毫秒）。
+    const DEALER_CONFIRM_FADE_MS = 300;
 
     // 翻牌动画保留期：每当 flippedBottomCards 数量发生变化（即新翻开一张），
     // 把"翻牌画面允许显示到何时"延后到 now + (1.5s 翻牌 + 0.5s 停顿) = 2s。
@@ -102,6 +108,16 @@ const game = data?.game;
     const [flipHoldUntil, setFlipHoldUntil] = useState<number>(0);
     const [nowTick, setNowTick] = useState<number>(() => Date.now());
     const lastFlippedCountRef = useRef<number>(0);
+    // 本地翻牌计数：用于确保每张牌都有一个独立的渲染帧从"卡背(rotateY 0)"过渡到"卡面(rotateY 180deg)"
+    // 工作流程：
+    //   1) 后端 flippedBottomCards.length 增长 → 把待翻数量加入队列
+    //   2) 队列按 1.6s 间隔逐张推进 localFlippedCount，
+    //      每次先 setState 触发一个仅修改"卡背"为"待翻"占位的渲染（保持 rotateY 0），
+    //      下一帧再设为已翻（rotateY 180deg），让浏览器捕获 transition 起点。
+    const [localFlippedCount, setLocalFlippedCount] = useState<number>(0);
+    // 定庄确认时间戳：翻牌动画播完后，后端已定庄（callPhase=finished / status=discarding）时记录，
+    // 翻牌画面会再保留 1 秒展示"定庄成功"提示，之后才让扣牌对话框弹出。
+    const [dealerConfirmedAt, setDealerConfirmedAt] = useState<number>(0);
 
     const [showDiscardDialog, setShowDiscardDialog] = useState(false);
     const [showCallFriendDialog, setShowCallFriendDialog] = useState(false);
@@ -125,26 +141,68 @@ const game = data?.game;
         return () => clearTimeout(t);
     }, [localCountdown]);
 
-    // 监听翻牌数量变化：每当新翻开一张牌，把保留截止时间设置为 now + 2s
-    // （1.5s 翻牌动画 + 0.5s 停顿，确保动画播放完整）。
+    // 监听翻牌数量变化：每当后端 flippedBottomCards.length 增长，
+    // 1) 把保留截止时间设置为 now + 2s（确保最后一张动画完整播完，详见 flipHoldUntil 注释）
+    // 2) 按 1.6s 间隔逐张推进 localFlippedCount，使每张牌都能播放完整的 1.5s 翻转动画。
+    //    即便后端 polling 一次性把 length 从 N 跳到 N+k，前端也会逐张播放。
     useEffect(() => {
         const count = game?.flippedBottomCards?.length ?? 0;
         if (count > lastFlippedCountRef.current) {
             lastFlippedCountRef.current = count;
             setFlipHoldUntil(Date.now() + 2000);
         }
-        // 当 status 退出 CALLING（例如重开一局回到 WAITING/DEALING），重置计数
-        if (game?.status !== EGameStatus.CALLING) {
+        // 当 status 退出 CALLING（例如重开一局回到 WAITING/DEALING），重置计数与定庄确认时间戳
+        if (game?.status !== EGameStatus.CALLING
+            && game?.status !== EGameStatus.DISCARDING
+            && game?.status !== EGameStatus.CALLING_FRIEND) {
             lastFlippedCountRef.current = count;
+            setLocalFlippedCount(count);
+            setDealerConfirmedAt(0);
         }
     }, [game?.flippedBottomCards?.length, game?.status]);
 
-    // 保留期内每 100ms 推进 nowTick，使 nowTick < flipHoldUntil 的判断能及时重渲染
+    // 逐张推进 localFlippedCount，直至追上后端的 flippedBottomCards.length
+    // 每次推进先确保上一张的翻转动画已基本完成（1.5s + 0.1s 缓冲）
     useEffect(() => {
-        if (nowTick >= flipHoldUntil) return;
+        const targetCount = game?.flippedBottomCards?.length ?? 0;
+        if (localFlippedCount >= targetCount) return;
+        const delay = localFlippedCount === 0 ? 50 : 1600;
+        const t = setTimeout(() => {
+            setLocalFlippedCount(c => Math.min(targetCount, c + 1));
+            setFlipHoldUntil(Date.now() + 2000);
+        }, delay);
+        return () => clearTimeout(t);
+    }, [localFlippedCount, game?.flippedBottomCards?.length]);
+
+    // 检测定庄确认：必须同时满足：
+    //   1) 后端 callPhase === 'finished'（后端确认不会再翻牌）
+    //   2) localFlippedCount 已追上后端的 flippedBottomCards.length（前端最后一张动画已开始/结束）
+    //   3) 至少经过该张牌的 0.5s 停顿（即翻牌完成后再停 0.5s 才判定为"定庄完成"）
+    // 这样可以避免出现"先弹出定庄成功 → 又退回翻牌中"的错乱
+    useEffect(() => {
+        if (dealerConfirmedAt > 0) return;
+        const targetCount = game?.flippedBottomCards?.length ?? 0;
+        if (targetCount === 0) return;
+        if (localFlippedCount < targetCount) return;
+        // 必须 callPhase 已经 finished，避免后端还可能继续翻牌时提前误判
+        if (game?.callPhase !== 'finished'
+            && game?.status !== EGameStatus.DISCARDING
+            && game?.status !== EGameStatus.CALLING_FRIEND) return;
+        // 还要确保最后一张牌的"1.5s 翻 + 0.5s 停顿"已基本播完
+        // flipHoldUntil 在每次 localFlippedCount 推进时被设置为 now + 2000ms
+        if (Date.now() < flipHoldUntil) return;
+        setDealerConfirmedAt(Date.now());
+    }, [localFlippedCount, game?.flippedBottomCards?.length, game?.callPhase, game?.status, dealerConfirmedAt, flipHoldUntil, nowTick]);
+
+    // 保留期内每 100ms 推进 nowTick，使条件判断能及时重渲染
+    useEffect(() => {
+        const shouldTick = nowTick < flipHoldUntil
+            || (dealerConfirmedAt > 0 && nowTick < dealerConfirmedAt + DEALER_CONFIRM_SHOW_MS + DEALER_CONFIRM_FADE_MS + 100)
+            || (localFlippedCount > 0 && localFlippedCount < (game?.flippedBottomCards?.length ?? 0));
+        if (!shouldTick) return;
         const t = setTimeout(() => setNowTick(Date.now()), 100);
         return () => clearTimeout(t);
-    }, [nowTick, flipHoldUntil]);
+    }, [nowTick, flipHoldUntil, dealerConfirmedAt, localFlippedCount, game?.flippedBottomCards?.length]);
 
     const logoutMutation = useLogout();
     const seatRefs = useRef<Record<number, HTMLDivElement | null>>({}); // 玩家头像 DOM 引用（座位 -> 元素）
@@ -232,12 +290,17 @@ const game = data?.game;
     }, [game?.currentTrick?.length]);
 
     // 自动显示扣牌或叫朋友对话框
-    // 注意：亮庄面板已直接内嵌渲染在桌布下方（见 JSX），不再依赖 showCallDialog
     useEffect(() => {
         if (!game) return;
-        // 翻牌动画保留期内不抢先弹出扣底牌对话框，等动画播放完整后下一次渲染再开
-        const inFlipHold = Date.now() < flipHoldUntil;
-        if (game.status === EGameStatus.DISCARDING && !inFlipHold) {
+        // 翻牌动画保留期内不抢先弹出扣底牌对话框：
+        // 1) 等翻牌动画播完（localFlippedCount 追上后端数量）
+        // 2) 等 flipHoldUntil 缓冲期过去
+        // 3) 若已定庄，等 dealerConfirmedAt + DEALER_CONFIRM_SHOW_MS 展示"定庄成功"完毕
+        const targetFlipped = game.flippedBottomCards?.length ?? 0;
+        const flipAnimPending = localFlippedCount < targetFlipped;
+        const inFlipHold = Date.now() < flipHoldUntil || flipAnimPending;
+        const inDealerConfirmShow = dealerConfirmedAt > 0 && Date.now() < dealerConfirmedAt + DEALER_CONFIRM_SHOW_MS;
+        if (game.status === EGameStatus.DISCARDING && !inFlipHold && !inDealerConfirmShow) {
             // 只有庄家才能扣牌
             if (game.dealerSeat === game.myPosition) {
                 setShowDiscardDialog(true);
@@ -255,7 +318,7 @@ const game = data?.game;
             setShowDiscardDialog(false);
             setShowCallFriendDialog(false);
         }
-    }, [game?.status, game?.dealerSeat, game?.myPosition, flipHoldUntil, nowTick]);
+    }, [game?.status, game?.dealerSeat, game?.myPosition, flipHoldUntil, nowTick, localFlippedCount, game?.flippedBottomCards?.length, dealerConfirmedAt]);
 
     // 自动加入游戏（如果尚未加入）
     useEffect(() => {
@@ -688,49 +751,64 @@ const game = data?.game;
                                     </>
                                 )}
 
-                                {/* 扣底牌阶段：显示即将扣下的 7 张底牌 */}
-                                {game.status === EGameStatus.DISCARDING && game.bottomCards && game.bottomCards.length > 0 && (
-                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-2">
-                                        <div className="text-[10px] sm:text-xs text-amber-200 mb-2">底牌（{game.bottomCards.length} 张）</div>
-                                        <div className="flex gap-1 flex-wrap justify-center max-w-[90%]">
-                                            {game.bottomCards.map((card, i) => (
-                                                <div key={i} className="h-12 w-8 sm:h-14 sm:w-10 flex flex-col items-center justify-center rounded-md font-bold border-2 border-amber-400/60 bg-white/15 backdrop-blur-sm overflow-hidden shadow-lg">
-                                                    {isJoker(card) ? (
-                                                        <img src={getJokerImageUrl(card)} alt={card.value === 'Big' ? '大王' : '小王'} className="w-full h-full object-contain" />
-                                                    ) : (
-                                                        <>
-                                                            <span className={cn(getSuitClass(card.suit), 'text-base sm:text-lg leading-none font-black')}>{SUIT_SYMBOLS[card.suit]||''}</span>
-                                                            <span className={cn(getSuitClass(card.suit), 'text-xs sm:text-sm leading-none font-bold')}>{card.value}</span>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                                {/* 扣底牌阶段：下方牌垫不再展示底牌，底牌信息统一在上浮的扣底牌对话框内呈现。 */}
+
 
                                 {/* 翻底牌定庄动画：
-                                    - 'flipping' 阶段：7 张底牌从左到右翻开（每张 1.5s 翻 + 0.5s 停顿）。
-                                    - 'finished' 阶段（约 3 秒）：所有牌保持翻开状态展示，让最后一张牌的动画播放完整、并展示翻牌结果。
-                                    - flipHoldUntil 保留期：即使 status 已切到 DISCARDING，
-                                      只要最近一次翻牌动画（任何一张，包括中间触发定庄的那张）还没播完 2s，
-                                      仍保持翻牌画面，确保任意定庄牌的翻牌动画完整呈现。
-                                    - 一旦 status 切到 'discarding' 且保留期过去，由"扣底牌"对话框接管展示级牌 + 底牌。 */}
-                                {((game.status === EGameStatus.CALLING
-                                        && (game.callPhase === 'flipping' || game.callPhase === 'finished'))
-                                    || (nowTick < flipHoldUntil && game.flippedBottomCards && game.flippedBottomCards.length > 0))
-                                    && game.bottomCards && game.bottomCards.length > 0 && (
-                                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-2 pointer-events-none">
-                                        <div className="text-[10px] sm:text-xs text-amber-200/80 mb-2 animate-pulse">
-                                            {game.callPhase === 'flipping'
-                                                ? `翻底定庄中 · 已翻 ${game.flippedBottomCards?.length ?? 0}/${game.bottomCards.length}`
-                                                : '定庄完成'}
+                                    - flipping 阶段：底牌从左到右逐张翻开（每张 1.5s 翻 + 0.5s 停顿）。
+                                    - 翻牌动画播完后若已定庄：保留翻牌画面 1 秒展示"定庄成功"。
+                                    - 之后翻牌画面消失，扣牌对话框弹出。 */}
+                                {(() => {
+                                    const isDealerConfirmed = dealerConfirmedAt > 0;
+                                    // 展示期：[dealerConfirmedAt, dealerConfirmedAt + DEALER_CONFIRM_SHOW_MS) 内完整显示"定庄成功"
+                                    // 淡出期：[dealerConfirmedAt + DEALER_CONFIRM_SHOW_MS, + DEALER_CONFIRM_SHOW_MS + DEALER_CONFIRM_FADE_MS) 渐隐
+                                    // 之后翻牌区完全消失，扣牌对话框接管。
+                                    const sinceConfirm = isDealerConfirmed ? Date.now() - dealerConfirmedAt : -1;
+                                    const dealerConfirmShowExpired = isDealerConfirmed && sinceConfirm >= DEALER_CONFIRM_SHOW_MS;
+                                    const dealerConfirmFullyGone = isDealerConfirmed && sinceConfirm >= DEALER_CONFIRM_SHOW_MS + DEALER_CONFIRM_FADE_MS;
+                                    // 按以下条件显示翻牌画面：
+                                    //   1) 正处于 CALLING 的 flipping/finished 阶段
+                                    //   2) 翻牌保留期内（最后一张动画 + 停顿尚未结束）
+                                    //   3) 前端 localFlippedCount 还在追后端
+                                    //   4) 处于定庄确认展示期或淡出期（dealerConfirmedAt 起 SHOW+FADE 毫秒内）
+                                    const showFlipping = !dealerConfirmFullyGone
+                                        && (
+                                            (game.status === EGameStatus.CALLING
+                                                && (game.callPhase === 'flipping' || game.callPhase === 'finished'))
+                                            || (nowTick < flipHoldUntil && game.flippedBottomCards && game.flippedBottomCards.length > 0)
+                                            || (localFlippedCount > 0 && localFlippedCount < (game.flippedBottomCards?.length ?? 0))
+                                            || (isDealerConfirmed && !dealerConfirmFullyGone)
+                                        )
+                                        && game.bottomCards && game.bottomCards.length > 0;
+                                    if (!showFlipping) return null;
+                                    const dealerPlayer = game.dealerSeat != null
+                                        ? players.find(p => p.position === game.dealerSeat)
+                                        : undefined;
+                                    // 整层透明度：进入淡出期后由 1 → 0
+                                    const layerOpacity = (isDealerConfirmed && dealerConfirmShowExpired) ? 0 : 1;
+                                    return (
+                                    <div
+                                        className="absolute inset-0 z-20 flex flex-col items-center justify-center p-2 pointer-events-none"
+                                        style={{
+                                            opacity: layerOpacity,
+                                            transition: `opacity ${DEALER_CONFIRM_FADE_MS}ms ease-out`,
+                                        }}
+                                    >
+                                        <div className="mb-2 h-6 sm:h-7 flex items-center justify-center">
+                                            {isDealerConfirmed ? (
+                                                <div className="px-3 py-1 rounded-md text-[11px] sm:text-sm text-green-100 font-bold bg-green-700/70 border border-green-300/60 shadow-lg whitespace-nowrap">
+                                                    ✓ 定庄成功{dealerPlayer ? ` · 庄家：${dealerPlayer.username}` : ''}
+                                                </div>
+                                            ) : (
+                                                <div className="px-2 py-0.5 rounded text-[10px] sm:text-xs text-amber-200/80 animate-pulse whitespace-nowrap">
+                                                    翻底定庄中 · 已翻 {localFlippedCount}/{game.bottomCards.length}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex gap-1.5 sm:gap-2 justify-center" style={{ perspective: '800px' }}>
                                             {game.bottomCards.map((card, i) => {
-                                                const flippedCount = game.flippedBottomCards?.length ?? 0;
+                                                const flippedCount = localFlippedCount;
                                                 const isFlipped = i < flippedCount;
-                                                const isCurrentlyFlipping = i === flippedCount - 1; // 最新翻开的那张播放动画
                                                 return (
                                                     <div
                                                         key={i}
@@ -741,7 +819,7 @@ const game = data?.game;
                                                             style={{
                                                                 transformStyle: 'preserve-3d',
                                                                 transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                                                                transition: isCurrentlyFlipping ? 'transform 1.5s ease-in-out' : 'none',
+                                                                transition: 'transform 1.5s ease-in-out',
                                                             }}
                                                         >
                                                             {/* 卡背 */}
@@ -774,7 +852,8 @@ const game = data?.game;
                                             })}
                                         </div>
                                     </div>
-                                )}
+                                    );
+                                })()}
 
                                 {/* 打牌阶段：5 行均分，每行与左侧对应玩家头像对齐 */}
                                 {game.status === EGameStatus.PLAYING && (
