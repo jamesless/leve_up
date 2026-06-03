@@ -1018,10 +1018,14 @@ const game = data?.game;
             )}
 
             {/* 亮庄 / 反庄面板：桌布外部下方、手牌区上方
-                仅在 DEALING/CALLING 阶段、且亮庄/反庄阶段尚未结束（callPhase !== 'finished'）时显示；
-                确定庄家后 callPhase 切到 'finished'，本面板立即消失 */}
+                显示窗口 = "从发牌开始" 到 "亮庄阶段结束"：
+                - 发牌阶段（dealing）：玩家可亮庄/反庄，但不倒计时
+                - 倒计时阶段（counting）：玩家可亮庄/反庄，倒计时进行中
+                - 翻底牌阶段（flipping）及以后：与亮庄/反庄互斥，本面板消失，
+                  由"翻底定庄"动画接管（详见 rules/03-bidding.md §3.4）
+                - 定庄完成（finished）/扣底（discarding）：本面板消失 */}
             {(game.status === EGameStatus.DEALING || game.status === EGameStatus.CALLING)
-                && game.callPhase !== 'finished'
+                && (game.callPhase === 'dealing' || game.callPhase === 'counting')
                 && (() => {
                     const mySeat = game.myPosition;
                     const hasCalled = game.callRecords?.some(r => r.seat === mySeat);
@@ -1176,39 +1180,8 @@ const game = data?.game;
 
                     <div className="flex flex-col gap-2 sm:gap-3">
                         {/* "不叫庄" 按钮已移至上方 CallDealerDialog 同一行，此处不再渲染 */}
-                        {game.status === EGameStatus.DISCARDING && game.dealerSeat === game.myPosition && !showDiscardDialog && (
-                            <Button
-                                variant="game"
-                                size="default"
-                                className="gap-1 sm:gap-2 text-sm sm:text-base font-bold w-full sm:w-auto"
-                                onClick={() => setShowDiscardDialog(true)}
-                            >
-                                扣牌
-                            </Button>
-                        )}
-                        {game.status === EGameStatus.DISCARDING && game.dealerSeat !== game.myPosition && (
-                            <div className="waiting-glass rounded-xl p-2 sm:p-4 text-center">
-                                <p className="text-xs sm:text-sm text-white/70">等待庄家扣牌...</p>
-                            </div>
-                        )}
-                        {game.status === EGameStatus.CALLING_FRIEND && !showCallFriendDialog && (
-                            <>
-                                {game.dealerSeat === game.myPosition ? (
-                                    <Button
-                                        variant="game"
-                                        size="default"
-                                        className="gap-1 sm:gap-2 text-sm sm:text-base font-bold w-full sm:w-auto"
-                                        onClick={() => setShowCallFriendDialog(true)}
-                                    >
-                                        叫朋友
-                                    </Button>
-                                ) : (
-                                    <div className="waiting-glass rounded-xl p-2 sm:p-4 text-center">
-                                        <p className="text-xs sm:text-sm text-white/70">请等待庄家选择花色</p>
-                                    </div>
-                                )}
-                            </>
-                        )}
+                        {/* 扣底牌阶段不再在底部一行显示按钮/等待提示：扣牌已统一在牌垫上方的浮动对话框层呈现 */}
+                        {/* 叫朋友阶段同理：叫朋友交互统一在浮动对话框层呈现，底部一行不再展示 */}
                         {game.status === EGameStatus.PLAYING && game.currentPlayer === game.myPosition && (
                             <>
                                 <Button
