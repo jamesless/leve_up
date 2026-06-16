@@ -95,9 +95,10 @@ const game = data?.game;
 
     // 翻底牌定庄完成后无需独立公告：级牌与底牌已合并到"扣底牌"对话框内统一展示。
     //
-    // 定庄成功展示时长（毫秒）：从 dealerConfirmedAt 起，在此时间内保留"✓ 定庄成功"提示。
-    // 过期后翻牌画面整体淡出消失，由上浮的扣牌对话框接管。
-    const DEALER_CONFIRM_SHOW_MS = 1500;
+    // 定庄成功展示时长（毫秒）：从 dealerConfirmedAt 起，在此时间内保留"✓ 定庄成功"提示，
+    // 同时让 7 张底牌完整呈现给所有玩家观察。
+    // 仅适用于"翻底定庄"路径；亮庄/反庄定庄不展示底牌（详见 rules/03-bidding.md §3.4 互斥说明）。
+    const DEALER_CONFIRM_SHOW_MS = 5000;
     // 翻牌→定庄成功→扣牌之间的淡出过渡时长（毫秒）。
     const DEALER_CONFIRM_FADE_MS = 300;
 
@@ -766,12 +767,20 @@ const game = data?.game;
                                     const sinceConfirm = isDealerConfirmed ? Date.now() - dealerConfirmedAt : -1;
                                     const dealerConfirmShowExpired = isDealerConfirmed && sinceConfirm >= DEALER_CONFIRM_SHOW_MS;
                                     const dealerConfirmFullyGone = isDealerConfirmed && sinceConfirm >= DEALER_CONFIRM_SHOW_MS + DEALER_CONFIRM_FADE_MS;
-                                    // 按以下条件显示翻牌画面：
+                                    // 仅当确实走过"翻底定庄"路径时才展示底牌区：
+                                    //   - 后端已经下发过至少一张翻开的底牌（game.flippedBottomCards.length > 0），或
+                                    //   - 前端 localFlippedCount > 0（动画已经开始/进行）
+                                    // 亮庄/反庄定庄路径下 callPhase 直接从 counting → finished，
+                                    // flippedBottomCards 始终为空，此处不再展示翻底底牌区
+                                    // （亮庄定庄与翻底定庄互斥，详见 rules/03-bidding.md §3.4）。
+                                    const isBottomFlipPath = (game.flippedBottomCards?.length ?? 0) > 0 || localFlippedCount > 0;
+                                    // 按以下条件显示翻牌画面（必须先满足 isBottomFlipPath）：
                                     //   1) 正处于 CALLING 的 flipping/finished 阶段
                                     //   2) 翻牌保留期内（最后一张动画 + 停顿尚未结束）
                                     //   3) 前端 localFlippedCount 还在追后端
                                     //   4) 处于定庄确认展示期或淡出期（dealerConfirmedAt 起 SHOW+FADE 毫秒内）
-                                    const showFlipping = !dealerConfirmFullyGone
+                                    const showFlipping = isBottomFlipPath
+                                        && !dealerConfirmFullyGone
                                         && (
                                             (game.status === EGameStatus.CALLING
                                                 && (game.callPhase === 'flipping' || game.callPhase === 'finished'))
@@ -794,11 +803,16 @@ const game = data?.game;
                                             transition: `opacity ${DEALER_CONFIRM_FADE_MS}ms ease-out`,
                                         }}
                                     >
-                                        <div className="mb-2 h-6 sm:h-7 flex items-center justify-center">
+                                        <div className="mb-2 flex flex-col items-center justify-center gap-1">
                                             {isDealerConfirmed ? (
-                                                <div className="px-3 py-1 rounded-md text-[11px] sm:text-sm text-green-100 font-bold bg-green-700/70 border border-green-300/60 shadow-lg whitespace-nowrap">
-                                                    ✓ 定庄成功{dealerPlayer ? ` · 庄家：${dealerPlayer.username}` : ''}
-                                                </div>
+                                                <>
+                                                    <div className="px-3 py-1 rounded-md text-[11px] sm:text-sm text-green-100 font-bold bg-green-700/70 border border-green-300/60 shadow-lg whitespace-nowrap">
+                                                        ✓ 定庄成功{dealerPlayer ? ` · 庄家：${dealerPlayer.username}` : ''}
+                                                    </div>
+                                                    <div className="px-2 py-0.5 rounded text-[10px] sm:text-xs text-amber-100/90 bg-black/30 border border-amber-300/30 whitespace-nowrap">
+                                                        底牌展示中…
+                                                    </div>
+                                                </>
                                             ) : (
                                                 <div className="px-2 py-0.5 rounded text-[10px] sm:text-xs text-amber-200/80 animate-pulse whitespace-nowrap">
                                                     翻底定庄中 · 已翻 {localFlippedCount}/{game.bottomCards.length}
@@ -967,15 +981,24 @@ const game = data?.game;
                 cardMatEl,
             )}
 
-            {/* 亮庄倒计时通知：以 portal 形式贴在牌垫中央，显示倒计时和当前亮庄状态 */}
-            {cardMatEl && game.status === EGameStatus.CALLING && game.callPhase === 'counting' && localCountdown != null && localCountdown > 0 && createPortal(
+            {/* 亮庄状态条：以 portal 形式贴在牌垫中央，
+                显示窗口 = 发牌开始（dealing）→ 亮庄阶段结束（callPhase 离开 dealing/counting）
+                - 发牌阶段（DEALING 或 CALLING.dealing）：有人亮庄时展示"谁用几张亮了什么"，无倒计时数字
+                - 倒计时阶段（CALLING.counting）：同时展示倒计时数字
+                - 亮庄定庄进入 discarding 后整个状态条消失（与翻底定庄互斥，不展示底牌） */}
+            {cardMatEl
+                && (game.status === EGameStatus.DEALING || game.status === EGameStatus.CALLING)
+                && (game.callPhase === 'dealing' || game.callPhase === 'counting')
+                && createPortal(
                 <div
-                    className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 pointer-events-none"
-                    aria-label="亮庄倒计时"
+                    className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 pointer-events-none pt-20 sm:pt-24"
+                    aria-label="亮庄状态"
                 >
-                    <div className="px-4 py-2 rounded-full text-sm sm:text-base font-bold tracking-wide text-amber-100 bg-amber-900/70 border border-amber-300/50 backdrop-blur-sm shadow-lg">
-                        亮庄倒计时 {localCountdown}s
-                    </div>
+                    {game.callPhase === 'counting' && localCountdown != null && localCountdown > 0 && (
+                        <div className="px-4 py-2 rounded-full text-sm sm:text-base font-bold tracking-wide text-amber-100 bg-amber-900/70 border border-amber-300/50 backdrop-blur-sm shadow-lg">
+                            亮庄倒计时 {localCountdown}s
+                        </div>
+                    )}
                     {(() => {
                         const lastCall = game.callRecords && game.callRecords.length > 0
                             ? game.callRecords[game.callRecords.length - 1]
@@ -993,11 +1016,14 @@ const game = data?.game;
                                 </div>
                             );
                         }
-                        return (
-                            <div className="px-3 py-1 rounded-full text-xs sm:text-sm text-white/50 bg-black/40 border border-white/20 backdrop-blur-sm">
-                                当前无人亮庄，倒计时结束后翻底牌定庄
-                            </div>
-                        );
+                        if (game.callPhase === 'counting') {
+                            return (
+                                <div className="px-3 py-1 rounded-full text-xs sm:text-sm text-white/50 bg-black/40 border border-white/20 backdrop-blur-sm">
+                                    当前无人亮庄，倒计时结束后翻底牌定庄
+                                </div>
+                            );
+                        }
+                        return null;
                     })()}
                 </div>,
                 cardMatEl,
@@ -1036,7 +1062,11 @@ const game = data?.game;
                             <CallDealerDialog
                                 onSubmit={handleCallDealer}
                                 isPending={callDealerMutation.isPending}
-                                currentLevel={game.trumpRank || '2'}
+                                currentLevel={
+                                    game.players?.find(p => p.position === game.myPosition)?.level
+                                    || game.currentLevel
+                                    || '2'
+                                }
                                 myHand={game.myHand}
                                 players={game.players}
                                 myPosition={game.myPosition}

@@ -62,20 +62,25 @@ export default function CallDealerDialog({
     return [...callRecords].sort((a, b) => b.timestamp - a.timestamp)[0];
   }, [callRecords]);
 
-  // 我的级数 + 其他玩家的级数（去重，排除我自己）
+  // 我的级数 + 其他玩家的级数 + lastCall 的级数（去重）
+  // 注意：lastCall.rank 必须包含在内，否则在如下场景会导致按钮整体消失：
+  //   - 我自己亮过 1 张红桃2，想再亮 2 张红桃2 追加
+  //   - 别人亮了某级数（比如临时庄家级牌），我想用同级数反庄
+  // 兜底加入 lastCall.rank 后，computeButton 就会被正常调用并产出"自己加注/反庄"按钮。
   const ranksToShow = useMemo(() => {
     const myRank = currentLevel;
-    const othersSet = new Set<string>();
+    const set = new Map<string, boolean>(); // rank -> isOwn
+    set.set(myRank, true);
     players?.forEach((p) => {
-      if (p.position !== myPosition && p.level && p.level !== myRank) {
-        othersSet.add(p.level);
+      if (p.position !== myPosition && p.level && !set.has(p.level)) {
+        set.set(p.level, false);
       }
     });
-    return [
-      { rank: myRank, isOwn: true },
-      ...Array.from(othersSet).map((r) => ({ rank: r, isOwn: false })),
-    ];
-  }, [currentLevel, players, myPosition]);
+    if (lastCall && !set.has(lastCall.rank)) {
+      set.set(lastCall.rank, false);
+    }
+    return Array.from(set.entries()).map(([rank, isOwn]) => ({ rank, isOwn }));
+  }, [currentLevel, players, myPosition, lastCall]);
 
   // 对每个 (suit, rank) 在我手里有多少张
   const countByKey = useMemo(() => {

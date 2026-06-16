@@ -336,12 +336,22 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 		table.DealingPhase = "finished"
 		table.Status = "calling"
 		// 发完最后一张牌的瞬间处理倒计时/翻底（详见 rules/03-bidding.md §3.0 §3.1 §3.4）：
+		// - 发牌期间已有人亮庄并封顶（Count==3）：跳过倒计时，直接 finalize 切到扣底牌
 		// - 发牌期间已有人亮庄(CallPhase=="counting" 且有 CallRecords)：启动 5 秒追加倒计时给反庄机会
 		// - 发牌期间所有人已按"不叫庄"(PassedSeats==totalPlayers 且无 CallRecords)：直接进入翻底阶段
 		// - 其它情况：启动 10 秒初始倒计时
 		hasCall := len(table.CallRecords) > 0
 		allPassed := len(table.PassedSeats) == numPlayers
+		isMaxCalled := hasCall && table.CallRecords[len(table.CallRecords)-1].Count == 3
 		switch {
+		case isMaxCalled:
+			table.UpdatedAt = time.Now()
+			activeGames[gameID] = table
+			finalized, ferr := finalizeDealerAndStartPlaying(table)
+			if ferr != nil {
+				return finalized, true, ferr
+			}
+			return finalized, true, nil
 		case !hasCall && allPassed:
 			table.CallPhase = "flipping"
 			table.CallCountdown = 0
@@ -400,22 +410,35 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 	// 发完最后一张牌后立即触发完成逻辑
 	if table.DealtCardCount >= totalCards {
 		table.DealingPhase = "finished"
-		table.Status = "calling"
-		hasCall := len(table.CallRecords) > 0
-		allPassed := len(table.PassedSeats) == numPlayers
-		switch {
-		case !hasCall && allPassed:
-			table.CallPhase = "flipping"
-			table.CallCountdown = 0
-			table.FlipStartedAt = time.Now()
-		case hasCall:
-			table.CallPhase = "counting"
-			if table.CallCountdown <= 0 {
-				table.CallCountdown = 5
+		// 若已经被 finalize 推进到 discarding 等阶段（例如发牌中三张封顶定庄），
+		// 不要把 Status / CallPhase / CallCountdown 重置回 calling 流程。
+		if table.Status == "dealing" || table.Status == "calling" {
+			table.Status = "calling"
+			hasCall := len(table.CallRecords) > 0
+			allPassed := len(table.PassedSeats) == numPlayers
+			isMaxCalled := hasCall && table.CallRecords[len(table.CallRecords)-1].Count == 3
+			switch {
+			case isMaxCalled:
+				table.UpdatedAt = time.Now()
+				activeGames[gameID] = table
+				finalized, ferr := finalizeDealerAndStartPlaying(table)
+				if ferr != nil {
+					return finalized, true, ferr
+				}
+				return finalized, true, nil
+			case !hasCall && allPassed:
+				table.CallPhase = "flipping"
+				table.CallCountdown = 0
+				table.FlipStartedAt = time.Now()
+			case hasCall:
+				table.CallPhase = "counting"
+				if table.CallCountdown <= 0 {
+					table.CallCountdown = 5
+				}
+			default:
+				table.CallPhase = "counting"
+				table.CallCountdown = 10
 			}
-		default:
-			table.CallPhase = "counting"
-			table.CallCountdown = 10
 		}
 		table.UpdatedAt = time.Now()
 		activeGames[gameID] = table
@@ -555,7 +578,6 @@ func GetTableGame(gameID string) (*GameTable, error) {
 			table.HostID = table.PlayerHands[lastCall.Seat].UserID
 			table.TrumpSuit = lastCall.Suit
 			table.TrumpRank = lastCall.Rank
-			table.CallPhase = "finished"
 			log.Printf("[GetTableGame] Countdown ended, dealer confirmed: seat=%d, trumpSuit=%s, trumpRank=%s",
 				table.DealerSeat, table.TrumpSuit, table.TrumpRank)
 
@@ -575,11 +597,10 @@ func GetTableGame(gameID string) (*GameTable, error) {
 				},
 			})
 
-			// 确认庄家后，进入 finished 阶段并停留 3 秒（与翻底定庄结果展示节奏一致），
-			// 再由下次 GetTableGame tick 调用 finalizeDealerAndStartPlaying。
+			// 亮庄定庄不展示底牌，与翻底定庄互斥：倒计时归零后立即进入扣底牌阶段，中间不停顿。
 			table.UpdatedAt = time.Now()
 			activeGames[gameID] = table
-			return table, nil
+			return finalizeDealerAndStartPlaying(table)
 		}
 
 		// 无人亮庄，倒计时结束，进入翻底牌阶段
@@ -3933,6 +3954,9 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 	//   等发完最后一张牌后由 DealNextCard 统一启动 10 秒初始倒计时。
 	// - 发牌完成后(DealingPhase=="finished")：在初始/追加倒计时内发生亮庄/反庄，
 	//   倒计时刷新为 5 秒，给其他玩家反庄机会。
+	// - 例外：本次亮庄/反庄已经亮到 3 张（封顶），按规则不可能再有人反庄，
+	//   直接跳过倒计时进入定庄完成阶段（亮庄定庄不展示底牌）。
+	isMaxCallCount := len(cardsToPlay) == 3
 	table.CallPhase = "counting" // 标记已有人亮庄，等待可能的反庄
 	if table.DealingPhase == "finished" {
 		table.CallCountdown = 5
@@ -3964,25 +3988,41 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 
 	// 单人模式：让AI尝试反庄
 	if isSinglePlayerGame(table) {
-		// 检查AI是否可以反庄
-		aiCountered := tryAICounterCall(table, gameID)
-		// 如果没有AI反庄：
-		// - 发牌完成后(DealingPhase=="finished")：直接进入找朋友阶段
-		// - 发牌期间(DealingPhase=="dealing")：保持发牌节奏，不可中断发牌，
-		//   等 DealNextCard 发完最后一张后再由 GetTableGame tick 处理 finalize
-		if !aiCountered {
+		// 三张封顶：无人能再反，跳过AI反庄判定与倒计时
+		// 注意：定庄 ≠ 停止发牌。
+		// - 发牌已完成：立即 finalize 切到扣底牌
+		// - 发牌仍在进行：保持发牌节奏继续发完，由 DealNextCard 完成分支检测
+		//   "末次亮庄已封顶"并立即 finalize（无需走 10s/5s 倒计时）
+		if isMaxCallCount {
 			if table.DealingPhase == "finished" {
+				advanceCallingPlayer(table)
+				table.UpdatedAt = time.Now()
+				activeGames[gameID] = table
 				return finalizeDealerAndStartPlaying(table)
 			}
-			// 发牌期间：仅记录已亮庄，等待发牌完成；CallCountdown 保持 0
-			table.CallCountdown = 0
-		} else {
-			// 如果有AI反庄，给其他AI反庄机会（发牌期间不启动倒计时；详见 rules/03-bidding.md §3.0）
-			if table.DealingPhase == "finished" {
-				table.CallCountdown = 3
-			} else {
-				table.CallCountdown = 0
-			}
+			// 发牌中：保持 CallPhase=counting + CallCountdown=0，让发牌继续
+			advanceCallingPlayer(table)
+			table.UpdatedAt = time.Now()
+			activeGames[gameID] = table
+			return table, nil
+		}
+		// 检查 AI 是否可以反庄（仅决定是否追加 CallRecords / 更新庄家信息，
+		// 不再决定是否提前 finalize）。
+		// 倒计时是公平的：不论 AI 是否反庄，只要发牌已完成，就必须等 5 秒追加倒计时
+		// 自然结束（让真人玩家有反庄机会），到时由 GetTableGame tick 统一 finalize。
+		// 发牌期间则保持 CallCountdown=0，等发完最后一张牌后再启动倒计时。
+		_ = tryAICounterCall(table, gameID)
+		// 函数顶部已根据 DealingPhase 设好 CallCountdown（finished→5、dealing→0）；
+		// 此处不再做任何 finalize / 缩短倒计时的特殊处理。
+	} else if isMaxCallCount {
+		// 多人模式下三张封顶：跳过反庄等待
+		// - 发牌已完成：立即 finalize 切到扣底牌
+		// - 发牌仍在进行：发牌继续，由 DealNextCard 完成分支检测封顶并 finalize
+		if table.DealingPhase == "finished" {
+			advanceCallingPlayer(table)
+			table.UpdatedAt = time.Now()
+			activeGames[gameID] = table
+			return finalizeDealerAndStartPlaying(table)
 		}
 	}
 
