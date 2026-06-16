@@ -337,9 +337,10 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 		table.Status = "calling"
 		// 发完最后一张牌的瞬间处理倒计时/翻底（详见 rules/03-bidding.md §3.0 §3.1 §3.4）：
 		// - 发牌期间已有人亮庄并封顶（Count==3）：跳过倒计时，直接 finalize 切到扣底牌
-		// - 发牌期间已有人亮庄(CallPhase=="counting" 且有 CallRecords)：启动 5 秒追加倒计时给反庄机会
 		// - 发牌期间所有人已按"不叫庄"(PassedSeats==totalPlayers 且无 CallRecords)：直接进入翻底阶段
-		// - 其它情况：启动 10 秒初始倒计时
+		// - 其它情况（包括"发牌期间已有人亮庄但未封顶"）：统一启动 10 秒初始倒计时
+		//   依据规则文档 §3.1：初始倒计时永远是 10 秒，发牌期间的亮庄不视作"倒计时内的亮庄"，
+		//   故不应覆盖为 5 秒；后续若有人在这 10 秒内再亮/反庄，才会刷新为 5 秒。
 		hasCall := len(table.CallRecords) > 0
 		allPassed := len(table.PassedSeats) == numPlayers
 		isMaxCalled := hasCall && table.CallRecords[len(table.CallRecords)-1].Count == 3
@@ -356,11 +357,6 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 			table.CallPhase = "flipping"
 			table.CallCountdown = 0
 			table.FlipStartedAt = time.Now()
-		case hasCall:
-			table.CallPhase = "counting"
-			if table.CallCountdown <= 0 {
-				table.CallCountdown = 5
-			}
 		default:
 			table.CallPhase = "counting"
 			table.CallCountdown = 10
@@ -430,11 +426,6 @@ func DealNextCard(gameID string) (*GameTable, bool, error) {
 				table.CallPhase = "flipping"
 				table.CallCountdown = 0
 				table.FlipStartedAt = time.Now()
-			case hasCall:
-				table.CallPhase = "counting"
-				if table.CallCountdown <= 0 {
-					table.CallCountdown = 5
-				}
 			default:
 				table.CallPhase = "counting"
 				table.CallCountdown = 10
@@ -3794,12 +3785,8 @@ func CallDealer(gameID, userID string, suit string, cardIndices []int) (*GameTab
 		return nil, fmt.Errorf("不在亮庄倒计时或发牌阶段")
 	}
 
-	// 检查玩家是否已经亮过庄
-	for _, record := range table.CallRecords {
-		if record.Seat == playerSeat {
-			return nil, fmt.Errorf("你已经亮过庄了")
-		}
-	}
+	// 注意：亮庄/反庄的判定只看"张数比上一次多 + 不超过 3 张"，与"谁亮过"无关。
+	// 即使同一玩家在被反走之后再反回来也是合法的，由下方反庄规则统一把关。
 
 	// 检查玩家是否已经选择不叫庄
 	for _, seat := range table.PassedSeats {
