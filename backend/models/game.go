@@ -1434,7 +1434,16 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 		// Play the cards
 		_, err = PlayCardsGame(gameID, hand.UserID, cardIndices)
 		if err != nil {
-			return nil, fmt.Errorf("AI %d play failed: %w", table.CurrentPlayer, err)
+			fmt.Printf("DEBUG AIPlayTurn: AI %d primary decision rejected: %v. Trying fallback.\n", table.CurrentPlayer, err)
+			fallbackIndices, fbErr := fallbackAIPlay(table, ai)
+			if fbErr != nil {
+				return nil, fmt.Errorf("AI %d play failed: %w (fallback: %v)", table.CurrentPlayer, err, fbErr)
+			}
+			fmt.Printf("DEBUG AIPlayTurn: Player %d fallback cards: %v\n", table.CurrentPlayer, fallbackIndices)
+			_, err = PlayCardsGame(gameID, hand.UserID, fallbackIndices)
+			if err != nil {
+				return nil, fmt.Errorf("AI %d play failed (after fallback): %w", table.CurrentPlayer, err)
+			}
 		}
 
 		// Refresh table state
@@ -1454,6 +1463,151 @@ func AIPlayTurn(gameID string) (*GameTable, error) {
 
 	fmt.Printf("DEBUG AIPlayTurn: Completed after %d iterations, currentPlayer=%d\n", iterations, table.CurrentPlayer)
 	return table, nil
+}
+
+// fallbackAIPlay produces a guaranteed-legal play when the primary AI decision is rejected.
+// Strategy:
+//   - If leading (no current trick), play the single lowest-value card.
+//   - If following, play exactly leadCount cards, prioritising the lead suit
+//     (excluding trump-rank cards / jokers, matching the validator's handSuitCards
+//     classification), then topping up with other cards from the hand.
+func fallbackAIPlay(table *GameTable, ai *AIPlayer) ([]int, error) {
+	if len(ai.Hand) == 0 {
+		return nil, fmt.Errorf("AI %d has empty hand", ai.SeatNumber)
+	}
+
+	if len(table.CurrentTrick) == 0 {
+		lowest := 0
+		lowestVal := getCardBaseValue(ai.Hand[0])
+		for i := 1; i < len(ai.Hand); i++ {
+			v := getCardBaseValue(ai.Hand[i])
+			if v < lowestVal {
+				lowestVal = v
+				lowest = i
+			}
+		}
+		return []int{lowest}, nil
+	}
+
+	leadSeat := table.CurrentTrick[0].Seat
+	var leadCards []Card
+	for _, pc := range table.CurrentTrick {
+		if pc.Seat == leadSeat {
+			leadCards = append(leadCards, pc.Card)
+		} else {
+			break
+		}
+	}
+	leadCount := len(leadCards)
+	if leadCount == 0 {
+		return []int{0}, nil
+	}
+	leadCard := leadCards[0]
+	trumpSuit := table.TrumpSuit
+	trumpRank := table.TrumpRank
+
+	var strict []int
+	for i, card := range ai.Hand {
+		if isSameSuitForFollow(card, leadCard, trumpSuit, trumpRank) {
+			strict = append(strict, i)
+		}
+	}
+
+	used := make(map[int]bool)
+	var result []int
+
+	sort.Slice(strict, func(i, j int) bool {
+		return getCardBaseValue(ai.Hand[strict[i]]) < getCardBaseValue(ai.Hand[strict[j]])
+	})
+
+	// 根据领出牌型组织跟牌，遵守牌型规则：
+	// - triple：有三张跟三张；没三张有对子跟对子+1散牌；都没有出散牌
+	// - pair：有对子跟对子；没有出散牌
+	// - 其他（single/tractor/throw）：按价值从低到高凑够数量
+	leadCardType := analyzeLeadCardType(leadCards, trumpSuit, trumpRank)
+
+	if leadCardType == "triple" || leadCardType == "pair" {
+		// 统计同花色手牌的点数出现次数
+		valueIndices := make(map[string][]int)
+		for _, idx := range strict {
+			v := ai.Hand[idx].Value
+			valueIndices[v] = append(valueIndices[v], idx)
+		}
+		// 找对子/三张
+		var tripleVals, pairVals []string
+		for v, idxs := range valueIndices {
+			if len(idxs) >= 3 {
+				tripleVals = append(tripleVals, v)
+			} else if len(idxs) >= 2 {
+				pairVals = append(pairVals, v)
+			}
+		}
+		if leadCardType == "triple" && len(tripleVals) > 0 {
+			// 有三张：出三张
+			idxs := valueIndices[tripleVals[0]]
+			for _, idx := range idxs[:3] {
+				result = append(result, idx)
+				used[idx] = true
+			}
+		} else if len(pairVals) > 0 || (leadCardType == "triple" && len(tripleVals) > 0) {
+			// 有对子（triple 时没三张但有对子，或 pair 时有对子）：出对子
+			var pairIdxs []int
+			if leadCardType == "triple" && len(tripleVals) > 0 {
+				pairIdxs = valueIndices[tripleVals[0]][:2]
+			} else {
+				pairIdxs = valueIndices[pairVals[0]][:2]
+			}
+			for _, idx := range pairIdxs {
+				result = append(result, idx)
+				used[idx] = true
+			}
+			// triple 还需要补1张散牌
+			if leadCardType == "triple" {
+				for _, idx := range strict {
+					if !used[idx] {
+						result = append(result, idx)
+						used[idx] = true
+						break
+					}
+				}
+			}
+		}
+		// 没有对子/三张：result 保持为空，下面统一用散牌凑
+	}
+
+	// 用散牌凑够 leadCount（处理 single/tractor/throw，以及上面没凑够的情况）
+	for _, idx := range strict {
+		if len(result) >= leadCount {
+			break
+		}
+		if !used[idx] {
+			result = append(result, idx)
+			used[idx] = true
+		}
+	}
+
+	if len(result) < leadCount {
+		var rest []int
+		for i := range ai.Hand {
+			if !used[i] {
+				rest = append(rest, i)
+			}
+		}
+		sort.Slice(rest, func(i, j int) bool {
+			return getCardBaseValue(ai.Hand[rest[i]]) < getCardBaseValue(ai.Hand[rest[j]])
+		})
+		for _, idx := range rest {
+			if len(result) >= leadCount {
+				break
+			}
+			result = append(result, idx)
+		}
+	}
+
+	if len(result) != leadCount {
+		return nil, fmt.Errorf("fallback could not assemble %d cards (got %d)", leadCount, len(result))
+	}
+	return result, nil
 }
 
 // AICallFriendCard decides which card to call as friend
@@ -3369,21 +3523,23 @@ func analyzeLeadCardType(leadCards []Card, trumpSuit, trumpRank string) string {
 // 4. 有色跟色，色绝了后可以随便出（任意牌，不一定是主牌）
 func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, handCards []Card, trumpSuit string, trumpRank string) error {
 	leadCardCount := len(leadCards)
-	leadSuit := leadCards[0].Suit
+	leadCard := leadCards[0]
 
 	// 验证出牌数量必须与领出数量一致
 	if len(cards) != leadCardCount {
 		return fmt.Errorf("必须出%d张牌", leadCardCount)
+
 	}
 
-	// 分类手牌（同花色牌、主牌/级牌、其他副牌）
+	// 分类手牌（同花色牌、其他牌）
+	// 规则：领出主牌时，所有主牌视为同花色；领出副牌时，同花色副牌（排除主牌）视为同花色
 	handSuitCards := []Card{}
 	handOtherCards := []Card{}
 	for _, card := range handCards {
-		if card.Value == trumpRank || card.Value == "Joker" || card.Suit != leadSuit {
-			handOtherCards = append(handOtherCards, card)
-		} else {
+		if isSameSuitForFollow(card, leadCard, trumpSuit, trumpRank) {
 			handSuitCards = append(handSuitCards, card)
+		} else {
+			handOtherCards = append(handOtherCards, card)
 		}
 	}
 
@@ -3391,10 +3547,10 @@ func validateFollowSuit(cards []Card, leadCards []Card, leadCardType string, han
 	playedSuitCards := []Card{}
 	playedOtherCards := []Card{}
 	for _, card := range cards {
-		if card.Value == trumpRank || card.Value == "Joker" || card.Suit != leadSuit {
-			playedOtherCards = append(playedOtherCards, card)
-		} else {
+		if isSameSuitForFollow(card, leadCard, trumpSuit, trumpRank) {
 			playedSuitCards = append(playedSuitCards, card)
+		} else {
+			playedOtherCards = append(playedOtherCards, card)
 		}
 	}
 

@@ -1250,6 +1250,9 @@ const game = data?.game;
                 {callFriendMutation.isError && (
                     <p className="mt-2 text-center text-sm text-destructive">{callFriendMutation.error.message}</p>
                 )}
+                {aiPlay.isError && (
+                    <p className="mt-2 text-center text-sm text-destructive">AI 出牌失败：{aiPlay.error.message}</p>
+                )}
             </div>
         </div>
     );

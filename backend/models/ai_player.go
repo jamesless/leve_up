@@ -457,26 +457,31 @@ func (ai *AIPlayer) decideFollowCards(table *GameTable) []int {
 	isLeadPair := leadCount == 2 && leadCards[0].Value == leadCards[1].Value && leadCards[0].Suit == leadCards[1].Suit
 	isLeadTriple := leadCount == 3 && leadCards[0].Value == leadCards[1].Value && leadCards[1].Value == leadCards[2].Value && leadCards[0].Suit == leadCards[1].Suit && leadCards[1].Suit == leadCards[2].Suit
 
-	// Check if lead card is trump
 	leadIsTrump := isTrumpCard(leadCard, trumpSuit, trumpRank)
 
-	// Find cards that can follow the lead
-	var followCards []int
+	var strictFollow []int
+	var broadFollow []int
 	for i, card := range ai.Hand {
 		if isSameSuitForFollow(card, leadCard, trumpSuit, trumpRank) {
-			followCards = append(followCards, i)
+			broadFollow = append(broadFollow, i)
+		}
+		if leadIsTrump {
+			if card.Suit == trumpSuit && card.Value != trumpRank && card.Value != "Joker" {
+				strictFollow = append(strictFollow, i)
+			}
+		} else {
+			if card.Suit == leadSuit && card.Value != trumpRank && card.Value != "Joker" {
+				strictFollow = append(strictFollow, i)
+			}
 		}
 	}
 
-	// If we can follow suit
-	if len(followCards) > 0 {
-		// Determine the effective suit for finding pairs/triples
+	if len(broadFollow) > 0 {
 		effectiveSuit := leadSuit
 		if leadIsTrump {
-			// For trump, we need to consider all trump cards
 			effectiveSuit = trumpSuit
 		}
-		return ai.decideFollowWithSuit(table, followCards, leadCount, isLeadPair, isLeadTriple, effectiveSuit)
+		return ai.decideFollowWithSuit(table, broadFollow, strictFollow, leadCount, isLeadPair, isLeadTriple, effectiveSuit)
 	}
 
 	// Can't follow suit - decide to trump or discard
@@ -484,7 +489,7 @@ func (ai *AIPlayer) decideFollowCards(table *GameTable) []int {
 }
 
 // decideFollowWithSuit decides which cards to play when we have the lead suit
-func (ai *AIPlayer) decideFollowWithSuit(table *GameTable, followCards []int, leadCount int, isLeadPair bool, isLeadTriple bool, leadSuit string) []int {
+func (ai *AIPlayer) decideFollowWithSuit(table *GameTable, followCards []int, strictFollow []int, leadCount int, isLeadPair bool, isLeadTriple bool, leadSuit string) []int {
 	// Try to match the lead card type
 	if isLeadPair {
 		// Try to find a pair in the lead suit
@@ -523,19 +528,75 @@ func (ai *AIPlayer) decideFollowWithSuit(table *GameTable, followCards []int, le
 		}
 	}
 
-	// Can't match the exact type, play leadCount cards from the suit
-	// If we have enough cards in the suit, use them
+	// Single (or unmatched-type fallback): must respect "有色必须全部跟出" rule.
+	// strictFollow == validator's handSuitCards. If strictFollow has cards, we MUST play
+	// only strictFollow cards (up to leadCount). Only when strictFollow is exhausted
+	// (i.e. we've "色绝了") may we top up from the broader followCards or other cards.
+	if len(strictFollow) >= leadCount {
+		sort.Slice(strictFollow, func(i, j int) bool {
+			return getCardBaseValue(ai.Hand[strictFollow[i]]) < getCardBaseValue(ai.Hand[strictFollow[j]])
+		})
+		return strictFollow[:leadCount]
+	}
+
+	if len(strictFollow) > 0 {
+		// Must play all strictFollow cards, then top up with broader follow / other cards
+		needed := leadCount - len(strictFollow)
+		usedSet := make(map[int]bool)
+		for _, idx := range strictFollow {
+			usedSet[idx] = true
+		}
+
+		// First try the broader followCards (trump rank, jokers if lead is trump)
+		var extras []int
+		for _, idx := range followCards {
+			if !usedSet[idx] {
+				extras = append(extras, idx)
+			}
+		}
+		sort.Slice(extras, func(i, j int) bool {
+			return getCardBaseValue(ai.Hand[extras[i]]) < getCardBaseValue(ai.Hand[extras[j]])
+		})
+
+		result := append([]int{}, strictFollow...)
+		for _, idx := range extras {
+			if len(result) >= leadCount {
+				break
+			}
+			result = append(result, idx)
+			usedSet[idx] = true
+		}
+
+		// Still not enough - 色绝了, fill from any remaining hand cards (lowest first)
+		if len(result) < leadCount {
+			var rest []int
+			for i := range ai.Hand {
+				if !usedSet[i] {
+					rest = append(rest, i)
+				}
+			}
+			sort.Slice(rest, func(i, j int) bool {
+				return getCardBaseValue(ai.Hand[rest[i]]) < getCardBaseValue(ai.Hand[rest[j]])
+			})
+			for _, idx := range rest {
+				if len(result) >= leadCount {
+					break
+				}
+				result = append(result, idx)
+			}
+		}
+		_ = needed
+		return result
+	}
+
+	// No strict-suit cards at all: original behaviour, play from broad follow
 	if len(followCards) >= leadCount {
-		// Sort follow cards by strength (ascending - play lowest)
 		sort.Slice(followCards, func(i, j int) bool {
 			return getCardBaseValue(ai.Hand[followCards[i]]) < getCardBaseValue(ai.Hand[followCards[j]])
 		})
 		return followCards[:leadCount]
 	}
 
-	// Not enough cards in the suit - this means we can't properly follow
-	// This should not happen if the validation is correct
-	// Return all cards we have of this suit as fallback
 	fmt.Printf("WARNING: AI has only %d cards of suit %s but needs %d cards\n", len(followCards), leadSuit, leadCount)
 	return followCards
 }
