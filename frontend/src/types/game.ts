@@ -2,6 +2,10 @@ import type { ICard, ECardSuit } from './card';
 
 export enum EGameStatus {
   WAITING = 'waiting',
+  DEALING = 'dealing',           // 发牌阶段
+  CALLING = 'calling',           // 亮庄阶段
+  CALLING_FRIEND = 'calling_friend', // 叫朋友阶段
+  DISCARDING = 'discarding',     // 扣牌阶段
   PLAYING = 'playing',
   FINISHED = 'finished',
 }
@@ -13,6 +17,8 @@ export interface IPlayer {
   isReady: boolean;
   isAI: boolean;
   cardCount: number;
+  level: string;
+  isFriend?: boolean;
 }
 
 export interface IRoom {
@@ -33,12 +39,72 @@ export interface IGameState {
   currentPlayer: number;
   dealerTeam: number[];
   currentTrick: IPlayedCards[];
+  lastCompletedTrick?: IPlayedCards[]; // 上一轮完成的所有出牌记录
   players: IPlayer[];
   myHand: ICard[];
   myPosition: number;
   trumpSuit: ECardSuit | null;
+  trumpRank?: string; // 级牌点数
   bottomCards: ICard[];
   scores: Record<number, number>;
+  // 亮庄/反庄相关
+  dealerSeat?: number;
+  callPhase?: string;
+  callCountdown?: number;
+  currentCaller?: number;
+  callRecords?: ICallRecord[];
+  passedSeats?: number[];
+  flippedBottomCards?: ICard[];
+  // 叫朋友相关
+  hostCalledCard?: {
+    suit: string;
+    value: string;
+    position: number;
+    count: number;
+  };
+  friendRevealed?: boolean;
+  friendSeat?: number;
+  // 发牌相关
+  dealtCardCount?: number;
+  totalCardsPerPlayer?: number;
+  dealingPhase?: string;
+  lastDealtSeat?: number;
+  // 本局结算
+  totalPoints?: number;   // 抓分方总得分
+  roundResults?: IGameRoundResult[]; // 每个玩家的结算结果
+  lastPlay?: ILastPlay;  // 最后一手牌结果（含结算信息）
+  nextRoundCountdownStart?: string; // 下一局倒计时开始时间（ISO字符串，服务器同步）
+  // 甩牌失败高亮显示
+  throwBlocker?: number;    // 让甩牌失败的玩家座位号（用于高亮显示）
+  throwBlockerCard?: string; // 让甩牌失败的牌描述
+}
+
+export interface IGameRoundResult {
+  user_id: string;
+  old_level: string;
+  new_level: string;
+  is_winner: boolean;
+  score: number;
+}
+
+export interface ILastPlay {
+  success: boolean;
+  message: string;
+  nextPlayer: number;
+  trickComplete: boolean;
+  trickWinner?: number;
+  gameEnded?: boolean;
+  winnerTeam?: 'host' | 'guest';
+  finalScore?: number;
+  gameResults?: IGameRoundResult[];
+}
+
+export interface ICallRecord {
+  seat: number;
+  suit: string;
+  rank: string;
+  count: number;
+  timestamp: number;
 }
 
 export interface IPlayedCards {
@@ -54,6 +120,7 @@ export interface ICreateGameRequest {
 export interface IGameResponse {
   success: boolean;
   game?: IGameState;
+  table?: IGameState;
   error?: string;
 }
 

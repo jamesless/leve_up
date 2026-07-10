@@ -203,10 +203,54 @@ func CreateGame(c *gin.Context) {
 		return
 	}
 
+	// WebSocket broadcast: notify all clients about new room
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomCreated(game)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"game":    game,
 		"gameId":  game.ID,
+	})
+}
+
+// ListGames returns all active game rooms
+func ListGames(c *gin.Context) {
+	games, err := models.ListGames()
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, "Failed to get games list")
+		return
+	}
+
+	// Get player details for each game
+	type GameWithPlayers struct {
+		*models.GameState
+		Players []map[string]interface{} `json:"players"`
+	}
+
+	result := make([]GameWithPlayers, 0, len(games))
+	for _, game := range games {
+		players := make([]map[string]interface{}, 0)
+		for _, playerID := range game.PlayerIDs {
+			if user, err := models.GetUserByID(playerID); err == nil {
+				players = append(players, map[string]interface{}{
+					"id":       user.ID,
+					"username": user.Username,
+					"level":    user.Level,
+				})
+			}
+		}
+
+		result = append(result, GameWithPlayers{
+			GameState: game,
+			Players:   players,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"games":   result,
 	})
 }
 
@@ -263,6 +307,11 @@ func JoinGame(c *gin.Context) {
 	}
 
 	game, _ := models.GetGame(gameID)
+
+	// WebSocket broadcast: notify all clients about room update
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -334,10 +383,18 @@ func StartGameHandler(c *gin.Context) {
 		return
 	}
 
+	// WebSocket broadcast: notify all clients about room status change
+	if hub := GetWebSocketHub(); hub != nil {
+		game, _ := models.GetGame(gameID)
+		if game != nil {
+			hub.BroadcastRoomUpdate(game)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
-		"message": "游戏开始，请抢庄",
+		"message": "游戏开始，请亮庄",
 	})
 }
 
@@ -367,7 +424,7 @@ func CallFriendHandler(c *gin.Context) {
 		}
 	}
 
-	err := models.CallFriendCard(gameID, user.ID, suit, value, position)
+	table, err := models.CallFriendCard(gameID, user.ID, suit, value, position)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
@@ -398,13 +455,45 @@ func CallFriendHandler(c *gin.Context) {
 		})
 	}
 
+	// Build dealerTeam and scores from table data
+	dealerTeam := make([]int, 0, 2)
+	if table.DealerSeat > 0 {
+		dealerTeam = append(dealerTeam, table.DealerSeat)
+	}
+	if table.FriendRevealed && table.FriendSeat > 0 {
+		dealerTeam = append(dealerTeam, table.FriendSeat)
+	}
+	scores := make(map[int]int)
+	for seat, hand := range table.PlayerHands {
+		scores[seat] = hand.Score
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
+		"table":   table,
+		"game": map[string]interface{}{
+			"id":             table.GameID,
+			"status":         table.Status,
+			"currentLevel":   table.CurrentLevel,
+			"currentPlayer":  table.CurrentPlayer,
+			"dealerTeam":     dealerTeam,
+			"trumpSuit":      table.TrumpSuit,
+			"trumpRank":      table.TrumpRank,
+			"bottomCards":    table.BottomCards,
+			"scores":         scores,
+			"dealerSeat":     table.DealerSeat,
+			"callRecords":    table.CallRecords,
+			"passedSeats":    table.PassedSeats,
+			"callPhase":      table.CallPhase,
+			"hostCalledCard": table.HostCalledCard,
+			"friendRevealed": table.FriendRevealed,
+			"friendSeat":     table.FriendSeat,
+		},
 		"message": "Friend card called",
 	})
 }
 
-// CallDealerHandler handles a player calling for dealer (抢庄)
+// CallDealerHandler 处理玩家亮庄/反庄请求
 func CallDealerHandler(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
 	gameID := c.Param("id")
@@ -414,15 +503,10 @@ func CallDealerHandler(c *gin.Context) {
 		return
 	}
 
+	// suit 参数现在是可选的，如果不提供，将从选中的牌中自动提取
 	suit := data["suit"]
 
 	cardIndices, err := parseCardIndices(data, "cardIndices", "cardIndex")
-
-	if suit == "" {
-		middleware.SendError(c, http.StatusBadRequest, "suit is required")
-		return
-	}
-
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, "cardIndices is required")
 		return
@@ -461,7 +545,199 @@ func CallDealerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"table":   table,
-		"message": "抢庄成功",
+		"message": "亮庄成功",
+	})
+}
+
+// PassCallHandler handles a player passing on calling for dealer (不叫)
+func PassCallHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	table, err := models.PassCall(gameID, user.ID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "不叫成功",
+	})
+}
+
+// PlayerReadyHandler 处理玩家准备请求
+func PlayerReadyHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	// 检查游戏状态
+	game, err := models.GetGame(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusNotFound, "Game not found")
+		return
+	}
+
+	if game.Status != "waiting" {
+		middleware.SendError(c, http.StatusBadRequest, "Game already started")
+		return
+	}
+
+	// 设置玩家为准备状态
+	err = models.SetPlayerReady(gameID, user.ID, true)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 获取准备状态列表
+	readyStates, _ := models.GetPlayersReadyStatus(gameID)
+
+	// 检查是否满足开始条件（5人全准备 或 3人全准备）
+	allReady, totalPlayers, err := models.AreAllPlayersReady(gameID)
+	if err == nil && allReady && (totalPlayers == 5 || totalPlayers >= 3) {
+		// 自动开始游戏
+		table, err := models.StartGame(gameID, game.HostID)
+		if err == nil {
+			// WebSocket广播游戏开始
+			if hub := GetWebSocketHub(); hub != nil {
+				hub.BroadcastMessage("game_started", map[string]interface{}{
+					"gameId": gameID,
+					"table":  table,
+				})
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success":      true,
+				"message":      "游戏开始",
+				"gameStarted":  true,
+				"table":        table,
+				"readyStates":  readyStates,
+				"totalPlayers": totalPlayers,
+			})
+			return
+		}
+	}
+
+	// WebSocket广播准备状态变化
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"message":      "已准备",
+		"gameStarted":  false,
+		"readyStates":  readyStates,
+		"totalPlayers": totalPlayers,
+	})
+}
+
+// PlayerCancelReadyHandler 处理玩家取消准备请求
+func PlayerCancelReadyHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	// 检查游戏状态
+	game, err := models.GetGame(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusNotFound, "Game not found")
+		return
+	}
+
+	if game.Status != "waiting" {
+		middleware.SendError(c, http.StatusBadRequest, "Game already started")
+		return
+	}
+
+	err = models.SetPlayerReady(gameID, user.ID, false)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 获取准备状态列表
+	readyStates, _ := models.GetPlayersReadyStatus(gameID)
+	_, totalPlayers, _ := models.AreAllPlayersReady(gameID)
+
+	// WebSocket广播状态变化
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"message":      "已取消准备",
+		"readyStates":  readyStates,
+		"totalPlayers": totalPlayers,
+	})
+}
+
+// GetReadyStatusHandler 获取房间准备状态
+func GetReadyStatusHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	readyStates, err := models.GetPlayersReadyStatus(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	allReady, totalPlayers, _ := models.AreAllPlayersReady(gameID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"readyStates":  readyStates,
+		"totalPlayers": totalPlayers,
+		"allReady":     allReady,
+	})
+}
+
+// DealNextCardHandler 发下一轮牌
+func DealNextCardHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, complete, err := models.DealNextCard(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// WebSocket广播发牌状态
+	if hub := GetWebSocketHub(); hub != nil {
+		hub.BroadcastMessage("deal_cards", map[string]interface{}{
+			"gameId":              gameID,
+			"dealtCardCount":      table.DealtCardCount,
+			"totalCardsPerPlayer": table.TotalCardsPerPlayer,
+			"complete":            complete,
+			"dealerSeat":          table.DealerSeat,
+			"trumpSuit":           table.TrumpSuit,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":             true,
+		"table":               table,
+		"complete":            complete,
+		"dealtCardCount":      table.DealtCardCount,
+		"totalCardsPerPlayer": table.TotalCardsPerPlayer,
+	})
+}
+
+// CheckCountdownHandler 检查并处理倒计时
+func CheckCountdownHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, err := models.CheckAndProcessCountdown(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
 	})
 }
 
@@ -572,16 +848,50 @@ func StartSinglePlayerGame(c *gin.Context) {
 		return
 	}
 
-	// 自动为玩家抢庄（单人模式）
-	table, err = models.AutoCallForDealer(gameID)
+	// StartSinglePlayerGame now handles auto-calling and AI counter-calling internally
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+	})
+}
+
+// PassTurnHandler handles a player passing their turn (不出)
+func PassTurnHandler(c *gin.Context) {
+	user, _ := middleware.GetCurrentUser(c)
+	gameID := c.Param("id")
+
+	result, err := models.PassTurn(gameID, user.ID)
 	if err != nil {
 		middleware.SendError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	// Log the pass action
+	game, _ := models.GetGame(gameID)
+	if game != nil {
+		playerSeat := 0
+		for i, id := range game.PlayerIDs {
+			if id == user.ID {
+				playerSeat = i + 1
+				break
+			}
+		}
+
+		models.LogGameAction(models.GameActionLogRequest{
+			GameID:     gameID,
+			ActionType: "pass",
+			PlayerSeat: playerSeat,
+			PlayerID:   user.ID,
+			ActionData: nil,
+			ResultData: result,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"table":   table,
+		"result":  result,
+		"message": "Pass successful",
 	})
 }
 
@@ -617,39 +927,128 @@ func GetGameTableHandler(c *gin.Context) {
 	myPosition := 0
 	myHand := make([]models.Card, 0)
 
-	for seat := 1; seat <= 5; seat++ {
-		if hand, ok := table.PlayerHands[seat]; ok {
-			username := fmt.Sprintf("玩家%d", seat)
-			isAI := strings.HasPrefix(hand.UserID, "ai_")
-			if isAI {
-				username = fmt.Sprintf("AI-%d", seat)
-			} else if u, err := models.GetUserByID(hand.UserID); err == nil {
-				username = u.Username
-			}
+	// 如果游戏还在等待状态，从数据库获取玩家列表
+	if table.Status == "waiting" {
+		game, err := models.GetGame(gameID)
+		// 获取所有玩家的准备状态
+		readyStates, _ := models.GetPlayersReadyStatus(gameID)
+		readyMap := make(map[string]bool)
+		for _, rs := range readyStates {
+			readyMap[rs.UserID] = rs.IsReady
+		}
 
-			playerInfo := map[string]interface{}{
-				"id":        seat,
-				"userId":    hand.UserID,
-				"position":  seat,
-				"username":  username,
-				"isReady":   table.Status != "waiting",
-				"isAI":      isAI,
-				"cardCount": len(hand.Cards),
-				"isFriend":  hand.IsFriend,
-			}
-			players = append(players, playerInfo)
+		if err == nil {
+			for i, playerID := range game.PlayerIDs {
+				var username string
+				var isAI bool
 
-			scores[seat] = hand.Score
-			if hand.UserID == user.ID {
-				myPosition = seat
-				myHand = hand.Cards
+				var level string = "2" // 默认等级
+				if strings.HasPrefix(playerID, "ai_") {
+					isAI = true
+					// Extract AI number from playerID
+					aiNum := strings.TrimPrefix(playerID, "ai_")
+					username = fmt.Sprintf("AI-%s", aiNum)
+				} else if u, err := models.GetUserByID(playerID); err == nil {
+					username = u.Username
+					level = u.Level
+				} else {
+					username = fmt.Sprintf("玩家%d", i+1)
+				}
+
+				// 从准备状态映射中获取真实的准备状态
+				isReady := readyMap[playerID]
+
+				playerInfo := map[string]interface{}{
+					"id":        i + 1,
+					"userId":    playerID,
+					"position":  i + 1,
+					"username":  username,
+					"isReady":   isReady,
+					"isAI":      isAI,
+					"cardCount": 0,
+					"isFriend":  false,
+					"level":     level,
+				}
+				players = append(players, playerInfo)
+
+				if playerID == user.ID {
+					myPosition = i + 1
+				}
+			}
+		}
+	} else {
+		// 游戏已开始，从 PlayerHands 获取信息
+		for seat := 1; seat <= 5; seat++ {
+			if hand, ok := table.PlayerHands[seat]; ok {
+				username := fmt.Sprintf("玩家%d", seat)
+				level := "2" // 默认等级
+				isAI := strings.HasPrefix(hand.UserID, "ai_")
+				if isAI {
+					username = fmt.Sprintf("AI-%d", seat)
+				} else if u, err := models.GetUserByID(hand.UserID); err == nil {
+					username = u.Username
+					level = u.Level
+				}
+
+				playerInfo := map[string]interface{}{
+					"id":        seat,
+					"userId":    hand.UserID,
+					"position":  seat,
+					"username":  username,
+					"isReady":   table.Status != "waiting",
+					"isAI":      isAI,
+					"cardCount": len(hand.Cards),
+					"isFriend":  hand.IsFriend,
+					"level":     level,
+				}
+				players = append(players, playerInfo)
+
+				scores[seat] = hand.Score
+				if hand.UserID == user.ID {
+					myPosition = seat
+					myHand = hand.Cards
+				}
 			}
 		}
 	}
 
-	currentTrick := make([]map[string]interface{}, 0, len(table.CurrentTrick))
-	for _, trick := range table.CurrentTrick {
-		currentTrick = append(currentTrick, map[string]interface{}{
+	// 转换 currentTrick：将同一玩家连续出的牌合并为一个 entry，并正确设置 isLead
+	currentTrick := make([]map[string]interface{}, 0)
+	if len(table.CurrentTrick) > 0 {
+		// 找出第一张有 IsLead=true 的 entry index（领牌玩家的起始位置）
+		leadStart := -1
+		for i, trick := range table.CurrentTrick {
+			if trick.IsLead {
+				leadStart = i
+				break
+			}
+		}
+		// 按玩家分组：同一个玩家的连续 entries 合并
+		groups := []map[string]interface{}{}
+		i := 0
+		for i < len(table.CurrentTrick) {
+			seat := table.CurrentTrick[i].Seat
+			cards := []models.Card{}
+			for i < len(table.CurrentTrick) && table.CurrentTrick[i].Seat == seat {
+				cards = append(cards, table.CurrentTrick[i].Card)
+				i++
+			}
+			groups = append(groups, map[string]interface{}{
+				"playerId": seat,
+				"cards":    cards,
+			})
+		}
+		// 标记领牌者（leadStart 位置）
+		if leadStart >= 0 && leadStart < len(groups) {
+			groups[leadStart]["isLead"] = true
+		}
+		currentTrick = groups
+	}
+
+	// 转换上一轮完成的出牌记录
+	lastCompletedTrick := make([]map[string]interface{}, 0, len(table.LastCompletedTrick))
+	for _, trick := range table.LastCompletedTrick {
+		lastCompletedTrick = append(lastCompletedTrick, map[string]interface{}{
 			"playerId": trick.Seat,
 			"cards":    []models.Card{trick.Card},
 		})
@@ -669,18 +1068,41 @@ func GetGameTableHandler(c *gin.Context) {
 	}
 
 	gamePayload := map[string]interface{}{
-		"id":           table.GameID,
-		"status":       table.Status,
-		"currentLevel": table.CurrentLevel,
-		"currentPlayer": table.CurrentPlayer,
-		"dealerTeam":   dealerTeam,
-		"currentTrick": currentTrick,
-		"players":      players,
-		"myHand":       myHand,
-		"myPosition":   myPosition,
-		"trumpSuit":    trumpSuit,
-		"bottomCards":  table.BottomCards,
-		"scores":       scores,
+		"id":                 table.GameID,
+		"status":             table.Status,
+		"currentLevel":       table.CurrentLevel,
+		"currentPlayer":      table.CurrentPlayer,
+		"dealerTeam":         dealerTeam,
+		"currentTrick":       currentTrick,
+		"lastCompletedTrick": lastCompletedTrick,
+		"players":            players,
+		"myHand":             myHand,
+		"myPosition":         myPosition,
+		"trumpSuit":          trumpSuit,
+		"trumpRank":          table.TrumpRank,
+		"bottomCards":        table.BottomCards,
+		"flippedBottomCards": table.FlippedBottomCards,
+		"scores":             scores,
+		"dealerSeat":         table.DealerSeat,
+		"callRecords":        table.CallRecords,
+		"passedSeats":        table.PassedSeats,
+		"callCountdown":      table.CallCountdown,
+		"callPhase":          table.CallPhase,
+		"hostCalledCard":     table.HostCalledCard,
+		"friendRevealed":     table.FriendRevealed,
+		"friendSeat":         table.FriendSeat,
+		// 甩牌失败高亮显示
+		"throwBlocker":     table.ThrowBlocker,
+		"throwBlockerCard": table.ThrowBlockerCard,
+		// 本局结算信息
+		"totalPoints":             table.TotalPoints,
+		"roundResults":            table.RoundResults,
+		"nextRoundCountdownStart": table.NextRoundCountdownStart,
+		// 发牌阶段进度（供前端动画使用）
+		"dealtCardCount":      table.DealtCardCount,
+		"totalCardsPerPlayer": table.TotalCardsPerPlayer,
+		"dealingPhase":        table.DealingPhase,
+		"lastDealtSeat":       table.LastDealtSeat,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -824,5 +1246,71 @@ func GetGameActionsHandler(c *gin.Context) {
 		"success": true,
 		"actions": actions,
 		"count":   len(actions),
+	})
+}
+
+// GetPlayerPlayedCardsHandler 获取玩家在当前游戏中的出牌历史
+func GetPlayerPlayedCardsHandler(c *gin.Context) {
+	gameID := c.Param("id")
+	userID := c.GetString("userID")
+
+	// 获取游戏信息，找到玩家的座位号
+	table, err := models.GetTableGame(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusNotFound, "Game not found")
+		return
+	}
+
+	// 找到玩家的座位号
+	var playerSeat int
+	found := false
+	for seat, hand := range table.PlayerHands {
+		if hand.UserID == userID {
+			playerSeat = seat
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		middleware.SendError(c, http.StatusForbidden, "Player not in game")
+		return
+	}
+
+	// 获取该玩家的所有出牌历史
+	playedCards, err := models.GetPlayerPlayedCardsHistory(gameID, playerSeat)
+	if err != nil {
+		middleware.SendError(c, http.StatusInternalServerError, "Failed to retrieve played cards history")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"playedCards": playedCards,
+		"count":       len(playedCards),
+		"playerSeat":  playerSeat,
+	})
+}
+
+// NextRoundHandler 开始新的一局
+func NextRoundHandler(c *gin.Context) {
+	gameID := c.Param("id")
+
+	table, err := models.NextRound(gameID)
+	if err != nil {
+		middleware.SendError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// WebSocket 广播新一局开始
+	game, _ := models.GetGame(gameID)
+	if hub := GetWebSocketHub(); hub != nil && game != nil {
+		hub.BroadcastRoomUpdate(game)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"table":   table,
+		"message": "新一局开始",
 	})
 }

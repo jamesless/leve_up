@@ -1,0 +1,50 @@
+# Claude Long-Running Agent Configuration
+# 配置文件
+
+# 使用的实现语言 (go 或 python)
+# Default language implementation (go or python)
+language: go
+
+# Go 可执行文件路径 (留空则使用编译后的默认路径)
+# Path to Go executable (leave empty to use default compiled binary)
+go_binary: ""
+
+# Python 解释器路径 (留空则使用系统默认 python3)
+# Path to Python interpreter (leave empty to use system python3)
+python_binary: ""
+
+# 项目设置
+# Project settings
+project:
+  # 默认项目目录
+  default_directory: "."
+
+  # 进度文件名
+  progress_file: "claude-progress.txt"
+
+  # 功能列表文件名
+  feature_file: "feature_list.json"
+
+  # 是否自动 Git 提交
+  auto_git_commit: false
+
+# 显示设置
+# Display settings
+display:
+  # 是否使用彩色输出
+  use_colors: true
+
+  # 是否显示 emoji
+  use_emoji: true
+
+  # 最近会话显示数量
+  recent_sessions_count: 3
+
+# 调试设置
+# Debug settings
+debug:
+  # 是否启用调试模式
+  enabled: false
+
+  # 是否显示详细日志
+  verbose: false

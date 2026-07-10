@@ -36,6 +36,7 @@ func getEnvInt(key string, defaultValue int) int {
 
 // InitDB initializes the database connection and creates tables
 func InitDB() error {
+	// Use PostgreSQL
 	databaseURL := os.Getenv("DATABASE_URL")
 	psqlInfo := databaseURL
 
@@ -59,14 +60,14 @@ func InitDB() error {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+		return fmt.Errorf("failed to connect to PostgreSQL database: %w", err)
 	}
 
 	// Set connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 
-	log.Println("Database connected successfully")
+	log.Println("PostgreSQL database connected successfully")
 
 	// Create tables
 	if err := createTables(); err != nil {
@@ -130,6 +131,7 @@ func createTables() error {
 		game_id VARCHAR(64) NOT NULL,
 		user_id VARCHAR(64) NOT NULL,
 		seat_number INT DEFAULT 0,
+		is_ready BOOLEAN DEFAULT FALSE,
 		joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -138,6 +140,11 @@ func createTables() error {
 
 	if _, err := db.Exec(gamePlayersTable); err != nil {
 		return fmt.Errorf("failed to create game_players table: %w", err)
+	}
+
+	// Migration: Add is_ready column if it doesn't exist
+	if _, err := db.Exec(`ALTER TABLE game_players ADD COLUMN IF NOT EXISTS is_ready BOOLEAN DEFAULT FALSE`); err != nil {
+		log.Println("Warning: failed to add is_ready column:", err)
 	}
 
 	// Create game_records table for game history

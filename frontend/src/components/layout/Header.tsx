@@ -21,25 +21,30 @@ export default function Header() {
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-lg">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 font-display text-xl font-bold">
-          <Spade className="h-6 w-6 text-amber-500" />
-          <span className="bg-gradient-to-r from-amber-400 to-amber-600 bg-clip-text text-transparent">
+    <header className="sticky top-0 z-50 border-b border-border/40 glass backdrop-blur-xl">
+      <div className="mx-auto flex h-10 max-w-6xl items-center justify-between px-3">
+        {/* Logo with Glassmorphism - Coordinated Colors */}
+        <Link to="/" className="flex items-center gap-1.5 font-display text-base font-bold group leading-none">
+          <div className="relative">
+            <Spade className="h-4 w-4 text-primary transition-transform group-hover:scale-110" />
+            <div className="absolute inset-0 blur-md bg-primary/20 group-hover:bg-primary/30 transition-all" />
+          </div>
+          <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent">
             升级
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        {/* Navigation Links - Glass Style */}
+        <nav className="hidden items-center gap-0.5 md:flex">
           {NAV_LINKS.map(({ to, label }) => (
             <Link
               key={to}
               to={to}
               className={cn(
-                'rounded-md px-3 py-2 text-sm font-medium transition-colors hover:text-foreground',
+                'rounded-md px-2.5 py-1 text-xs font-semibold transition-all',
                 location.pathname === to
-                  ? 'text-foreground bg-accent'
-                  : 'text-muted-foreground',
+                  ? 'glass-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:glass',
               )}
             >
               {label}
@@ -47,10 +52,11 @@ export default function Header() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-3 md:flex">
+        {/* Auth Buttons - Glassmorphism Style */}
+        <div className="hidden items-center gap-1.5 md:flex">
           {isAuthenticated && user ? (
             <>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-[11px] font-medium glass-light px-2 py-0.5 rounded-full border border-white/20 leading-none">
                 {user.username}
               </span>
               <Button
@@ -58,18 +64,19 @@ export default function Header() {
                 size="sm"
                 onClick={() => logoutMutation.mutate()}
                 disabled={logoutMutation.isPending}
+                className="h-7 px-2 text-xs glass-card hover:glass-strong"
               >
-                <LogOut className="mr-1 h-4 w-4" />
+                <LogOut className="mr-1 h-3.5 w-3.5" />
                 退出
               </Button>
             </>
           ) : (
             <>
               <Link to="/login">
-                <Button variant="ghost" size="sm">登录</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs glass-card hover:glass-strong">登录</Button>
               </Link>
               <Link to="/register">
-                <Button size="sm" variant="game">注册</Button>
+                <Button size="sm" className="h-7 px-2 text-xs glass-strong bg-gradient-to-r from-primary/80 to-accent/80 hover:from-primary hover:to-accent text-white border-2 border-white/30">注册</Button>
               </Link>
             </>
           )}
@@ -78,38 +85,38 @@ export default function Header() {
         <Button
           variant="ghost"
           size="icon"
-          className="md:hidden"
+          className="md:hidden h-7 w-7"
           onClick={() => setMobileOpen(!mobileOpen)}
         >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
         </Button>
       </div>
 
       {mobileOpen && (
-        <div className="border-t border-border/40 bg-background px-4 pb-4 md:hidden animate-fade-in">
-          <nav className="flex flex-col gap-1 pt-2">
+        <div className="border-t border-border/40 glass backdrop-blur-xl px-4 pb-4 md:hidden animate-fade-in">
+          <nav className="flex flex-col gap-2 pt-3">
             {NAV_LINKS.map(({ to, label }) => (
               <Link
                 key={to}
                 to={to}
                 onClick={closeMobile}
                 className={cn(
-                  'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  'rounded-xl px-4 py-3 text-sm font-semibold transition-all',
                   location.pathname === to
-                    ? 'text-foreground bg-accent'
-                    : 'text-muted-foreground hover:text-foreground',
+                    ? 'glass-card text-foreground shadow-md'
+                    : 'text-muted-foreground hover:text-foreground hover:glass',
                 )}
               >
                 {label}
               </Link>
             ))}
           </nav>
-          <div className="mt-3 flex gap-2 border-t border-border/40 pt-3">
+          <div className="mt-4 flex gap-2 border-t border-border/40 pt-4">
             {isAuthenticated && user ? (
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-full"
+                className="w-full glass-card hover:glass-strong"
                 onClick={() => {
                   logoutMutation.mutate();
                   closeMobile();
@@ -121,10 +128,10 @@ export default function Header() {
             ) : (
               <>
                 <Link to="/login" className="flex-1" onClick={closeMobile}>
-                  <Button variant="ghost" size="sm" className="w-full">登录</Button>
+                  <Button variant="ghost" size="sm" className="w-full glass-card hover:glass-strong">登录</Button>
                 </Link>
                 <Link to="/register" className="flex-1" onClick={closeMobile}>
-                  <Button size="sm" variant="game" className="w-full">注册</Button>
+                  <Button size="sm" className="w-full glass-strong bg-gradient-to-r from-primary/80 to-accent/80 hover:from-primary hover:to-accent text-white border-2 border-white/30">注册</Button>
                 </Link>
               </>
             )}

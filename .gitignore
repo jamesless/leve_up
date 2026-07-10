@@ -6,6 +6,7 @@ frontend/node_modules/
 frontend/dist/
 backend/*.exe
 backend/leve_up
+/*.exe
 
 # Environment
 .env
@@ -31,4 +32,15 @@ backend/tmp/
 *.log
 npm-debug.log*
 
+# Test files
+test/
+*.test.go
+
 skills-lock.json
+
+# ChronoForge / Long-running memory
+claude-progress.txt
+claude-progress-archive.txt
+feature_list.json
+claude-long.exe
+init.sh
